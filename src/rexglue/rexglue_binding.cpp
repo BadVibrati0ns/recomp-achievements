@@ -22,6 +22,7 @@ struct RexglueBinding::State {
   xbox::XdbfTitle title;
   std::filesystem::path tu_path;
   uint32_t title_id = 0;
+  std::unique_ptr<xbox::XamAchievements> xam;
   bool bound = false;
   std::mutex mutex;  // Guards bound against Unbind racing a kernel callback.
 };
@@ -98,6 +99,7 @@ bool LoadInto(RexglueBinding::State& s) {
 }
 
 void Hook(const std::shared_ptr<RexglueBinding::State>& state) {
+#if RECOMP_ACH_REXGLUE_KERNEL_HOOKS
   std::weak_ptr<RexglueBinding::State> weak = state;
   auto* ks = state->kernel_state;
 
@@ -106,34 +108,33 @@ void Hook(const std::shared_ptr<RexglueBinding::State>& state) {
     if (!s) return;
     std::lock_guard lock(s->mutex);
     if (!s->bound) return;
-    // Only one local profile exists, so every user index unlocks it.
-    if (!s->system->FindByPlatformId(s->set_id, id)) {
-      REXLOG_WARN("recomp-achievements: game wrote unknown achievement {}", id);
-      if (s->options.on_unknown_achievement) s->options.on_unknown_achievement(user_index, id);
-      return;
-    }
-    s->system->Unlock(s->set_id, id);
+    // One XUSER_ACHIEVEMENT, in the guest's big-endian layout.
+    const uint8_t entry[8] = {uint8_t(user_index >> 24), uint8_t(user_index >> 16),
+                              uint8_t(user_index >> 8), uint8_t(user_index),
+                              uint8_t(id >> 24), uint8_t(id >> 16), uint8_t(id >> 8), uint8_t(id)};
+    s->xam->WriteAchievements(entry, 1);
   });
 
   ks->SetIsAchievementUnlockedCallback([weak](uint32_t, uint32_t id) {
     auto s = weak.lock();
     if (!s) return false;
     std::lock_guard lock(s->mutex);
-    return s->bound && s->system->IsUnlocked(s->set_id, id);
+    return s->bound && s->xam->IsUnlocked(id);
   });
 
   ks->SetShowAchievementsUICallback([weak](uint32_t user_index, uint32_t title_id) {
     auto s = weak.lock();
     if (!s) return;
-    std::function<void(uint32_t, uint32_t)> show;
     {
       std::lock_guard lock(s->mutex);
       if (!s->bound) return;
-      show = s->options.on_show_achievements;
     }
     // Outside the lock: the consumer may open UI that queries the System.
-    if (show) show(user_index, title_id);
+    s->xam->ShowAchievementsUI(user_index, title_id);
   });
+#else
+  (void)state;
+#endif
 }
 
 }  // namespace
@@ -149,10 +150,12 @@ void RexglueBinding::Unbind() {
     if (!state_->bound) return;
     state_->bound = false;
   }
+#if RECOMP_ACH_REXGLUE_KERNEL_HOOKS
   auto* ks = state_->kernel_state;
   ks->SetAchievementUnlockCallback(nullptr);
   ks->SetIsAchievementUnlockedCallback(nullptr);
   ks->SetShowAchievementsUICallback(nullptr);
+#endif
 }
 
 bool RexglueBinding::Reload() { return LoadInto(*state_); }
@@ -161,6 +164,8 @@ const xbox::XdbfTitle& RexglueBinding::title() const { return state_->title; }
 const std::filesystem::path& RexglueBinding::title_update_path() const { return state_->tu_path; }
 const std::string& RexglueBinding::set_id() const { return state_->set_id; }
 uint32_t RexglueBinding::title_id() const { return state_->title_id; }
+xbox::XamAchievements& RexglueBinding::xam() { return *state_->xam; }
+bool RexglueBinding::hooks_kernel() const { return RECOMP_ACH_REXGLUE_KERNEL_HOOKS != 0; }
 
 std::span<const uint8_t> RexglueBinding::ResolveIcon(std::string_view ref) const {
   return state_->title.ResolveIcon(ref);
@@ -174,6 +179,17 @@ std::unique_ptr<RexglueBinding> BindRexglue(rex::system::KernelState* kernel_sta
   state->system = &system;
   state->set_id = std::move(set_id);
   state->options = std::move(options);
+  state->xam = std::make_unique<xbox::XamAchievements>(system, state->set_id);
+  state->xam->SetUnknownHandler([](uint32_t, uint32_t id) {
+    REXLOG_WARN("recomp-achievements: game wrote unknown achievement {}", id);
+  });
+  if (state->options.on_unknown_achievement) {
+    state->xam->SetUnknownHandler([warn = state->options.on_unknown_achievement](uint32_t user, uint32_t id) {
+      REXLOG_WARN("recomp-achievements: game wrote unknown achievement {}", id);
+      warn(user, id);
+    });
+  }
+  state->xam->SetShowHandler(state->options.on_show_achievements);
   LoadInto(*state);
   state->bound = true;
   Hook(state);

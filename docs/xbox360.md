@@ -124,3 +124,37 @@ auto binding = recomp::achievements::BindRexglue(kernel_state, system, "my_game"
 Known gap: the patched enumerator reads names from the XEX database only, not
 the TU's `spa.bin`, so achievements only the TU has don't appear in the game's
 own list (they still unlock and show in the SDK's UI).
+
+## Stock rexglue: shimming XAM yourself (`recomp/achievements/sources/xam.h`)
+
+Some recomps keep rexglue stock and change its behaviour only from host shims, for example by overriding an
+`__imp__` export and reaching the original through `dlsym(RTLD_NEXT)`. Those recomps can't apply
+`patches/rexglue-achievements.patch`, so build with `-DRECOMP_ACH_REXGLUE_PATCHED=OFF`. Then `BindRexglue`
+still loads the title's XDBF and the newest spa.bin, but hooks nothing. Your shims pass the game's calls to
+`binding->xam()`, an `xbox::XamAchievements` that works on raw guest data:
+
+| Game call | Shim does |
+|---|---|
+| `XGIUserWriteAchievements` (XGI message `0x000B0008`, `xbox::kXgiUserWriteAchievements`) | `xam().WriteAchievementsMessage(buffer, translate)`, then calls the stock handler |
+| `XamEnumerate` on an achievement enumerator | calls the stock export, then `xam().ApplyUnlockState(buffer, items_written)` |
+| `XamShowAchievementsUI`, `...UIEx`, `XamShowAchievementDetailsUI` | `xam().ShowAchievementsUI(user_index, title_id)` (runs `on_show_achievements`) |
+
+`translate` turns a guest address into a host pointer (for example `memory->TranslateVirtual`). To catch
+only achievement enumerators in `XamEnumerate`, remember the handles your
+`XamUserCreateAchievementEnumerator` shim returns.
+
+```cpp
+recomp::achievements::RexglueOptions options;
+options.on_show_achievements = [](uint32_t, uint32_t) { OpenAchievementList(); };
+auto binding = recomp::achievements::BindRexglue(kernel_state, system, "my_game", options);
+
+// In the XGI message shim, before calling the original:
+if (message == recomp::achievements::xbox::kXgiUserWriteAchievements) {
+  binding->xam().WriteAchievementsMessage(host_buffer, [&](uint32_t address) {
+    return memory->TranslateVirtual<const uint8_t*>(address);
+  });
+}
+```
+
+`XamAchievements` doesn't need rexglue at all, so other Xbox 360 frameworks can use it the same way with
+their own `System` and set id.

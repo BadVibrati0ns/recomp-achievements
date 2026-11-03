@@ -28,6 +28,9 @@ set(RECOMP_ACH_IMGUI_TARGET "" CACHE STRING "Existing Dear ImGui target to link 
 set(RECOMP_ACH_SDL3_TARGET "" CACHE STRING "Existing SDL3 target used to play sounds")
 # rexglue's runtime target (e.g. rex::runtime). Empty: no rexglue binding.
 set(RECOMP_ACH_REXGLUE_TARGET "" CACHE STRING "rexglue runtime target for the Xbox 360 binding")
+# Whether that rexglue has patches/rexglue-achievements.patch. Off: stock
+# rexglue, and the recomp shims XAM itself through RexglueBinding::xam().
+option(RECOMP_ACH_REXGLUE_PATCHED "rexglue includes patches/rexglue-achievements.patch" ON)
 
 include(cmake/core.cmake)
 include(cmake/ui.cmake)

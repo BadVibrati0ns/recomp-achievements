@@ -2,7 +2,7 @@
 # dependencies; they link the core for the shared types and System.
 set(_ra_src ${CMAKE_CURRENT_LIST_DIR}/../src/sources)
 
-add_library(recomp_achievements_xbox STATIC ${_ra_src}/xdbf.cpp)
+add_library(recomp_achievements_xbox STATIC ${_ra_src}/xdbf.cpp ${_ra_src}/xam.cpp)
 add_library(recomp::achievements_xbox ALIAS recomp_achievements_xbox)
 target_link_libraries(recomp_achievements_xbox PUBLIC recomp_achievements)
 
@@ -19,6 +19,7 @@ if(RECOMP_ACH_BUILD_TESTS)
   add_executable(recomp_achievements_sources_tests
       ${_ra_tests}/main.cpp
       ${_ra_tests}/xdbf_tests.cpp
+      ${_ra_tests}/xam_tests.cpp
       ${_ra_tests}/trophy_tests.cpp)
   target_include_directories(recomp_achievements_sources_tests PRIVATE ${_ra_src} ${_ra_tests})
   target_link_libraries(recomp_achievements_sources_tests PRIVATE

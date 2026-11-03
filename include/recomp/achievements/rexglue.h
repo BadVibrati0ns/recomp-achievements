@@ -1,11 +1,13 @@
 #pragma once
 
-// Binding for rexglue (Xbox 360) recomps. Needs rexglue built with
-// patches/rexglue-achievements.patch, which adds the kernel achievement
-// callbacks this hooks:
+// Binding for rexglue (Xbox 360) recomps. With rexglue built with
+// patches/rexglue-achievements.patch (CMake RECOMP_ACH_REXGLUE_PATCHED, the
+// default), it hooks the kernel achievement callbacks that patch adds:
 //   XGIUserWriteAchievements          -> System::Unlock(set_id, id)
 //   XamUserCreateAchievementEnumerator <- System's unlocked state
 //   XamShowAchievementsUI(Ex)/DetailsUI -> options.on_show_achievements
+// With stock rexglue (RECOMP_ACH_REXGLUE_PATCHED=OFF) nothing is hooked; the
+// recomp's own XAM shims pass those calls to xam() instead.
 // It also builds the title's AchievementSet from the XEX's XDBF plus the best
 // title update / content spa.bin, and serves its images for "xdbf:<id>" icons.
 // See docs/xbox360.md.
@@ -19,6 +21,7 @@
 #include <string_view>
 #include <vector>
 
+#include "recomp/achievements/sources/xam.h"
 #include "recomp/achievements/sources/xdbf.h"
 
 namespace rex::system {
@@ -67,6 +70,11 @@ class RexglueBinding {
   const std::filesystem::path& title_update_path() const;
   const std::string& set_id() const;
   uint32_t title_id() const;
+  // The XAM calls on raw guest data, for recomps that shim XAM themselves.
+  // Wired to the options' handlers.
+  xbox::XamAchievements& xam();
+  // True when the kernel callbacks are hooked (patched rexglue).
+  bool hooks_kernel() const;
   // PNG bytes for "xdbf:<id>"; empty for other refs. Valid until Reload().
   std::span<const uint8_t> ResolveIcon(std::string_view ref) const;
 
