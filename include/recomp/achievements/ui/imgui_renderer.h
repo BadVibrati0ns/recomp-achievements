@@ -13,6 +13,7 @@
 #include "imgui.h"
 #include "recomp/achievements/ui/icon_cache.h"
 #include "recomp/achievements/ui/notification_center.h"
+#include "recomp/achievements/ui/painter.h"
 
 namespace recomp::achievements::ui {
 
@@ -33,6 +34,29 @@ void DrawTrophy(ImDrawList* draw_list, ImVec2 c, float r, ImU32 col);
 inline ImTextureID ToImTextureID(void* texture) {
   return (ImTextureID)(uintptr_t)texture;
 }
+
+// Painter over an ImDrawList, for drawing the shared popup look (painter.h).
+// Textures are ImTextureIDs cast to void*. bold may be null (= regular).
+class ImGuiPainter : public Painter {
+ public:
+  ImGuiPainter(ImDrawList* draw_list, ImFont* regular, ImFont* bold = nullptr);
+
+  float TextWidth(bool bold, float size, std::string_view text) const override;
+  void FillRect(Vec2 min, Vec2 max, const Color& c, float rounding = 0.0f, int corners = kCornersAll) override;
+  void StrokeRect(Vec2 min, Vec2 max, const Color& c, float rounding, float thickness) override;
+  void FillCircle(Vec2 center, float radius, const Color& c, int segments) override;
+  void StrokeCircle(Vec2 center, float radius, const Color& c, int segments, float thickness) override;
+  void DrawImage(void* texture, Vec2 min, Vec2 max, const Color& tint, float rounding) override;
+  void Text(bool bold, float size, Vec2 pos, const Color& c, std::string_view text) override;
+  void PushClip(Vec2 min, Vec2 max) override;
+  void PopClip() override;
+
+ private:
+  ImFont* Font(bool bold) const { return bold && bold_ ? bold_ : regular_; }
+  ImDrawList* dl_;
+  ImFont* regular_;
+  ImFont* bold_;
+};
 
 class ImGuiRenderer {
  public:

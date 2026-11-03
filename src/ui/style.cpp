@@ -727,6 +727,35 @@ class Patcher {
           else return false;
           return true;
         });
+      } else if (k == "viewer") {
+        Object(v, sp, [&](const std::string& vk, const json& vv, const std::string& vp) {
+          if (vk == "key") Str(vv, vp, s.viewer.key);
+          else if (vk == "pad") Str(vv, vp, s.viewer.pad);
+          else if (vk == "buttons") Str(vv, vp, s.viewer.buttons);
+          else if (vk == "scale") Num(vv, vp, s.viewer.scale, 0.25f, 4.0f);
+          else if (vk == "colors" || vk == "colours") {
+            Object(vv, vp, [&](const std::string& ck, const json& cv, const std::string& cp) {
+              std::optional<Color>* slot = nullptr;
+              if (ck == "backdrop") slot = &s.viewer.backdrop;
+              else if (ck == "panel") slot = &s.viewer.panel;
+              else if (ck == "accent") slot = &s.viewer.accent;
+              else if (ck == "text") slot = &s.viewer.text;
+              else if (ck == "subtext") slot = &s.viewer.subtext;
+              else return false;
+              if (cv.is_null()) {
+                slot->reset();  // Back to following the popups.
+                return true;
+              }
+              Color col;
+              if (ParseColor(cv, col)) *slot = col;
+              else Warn(cp, "expected \"#RRGGBB(AA)\" or [r, g, b, a]");
+              return true;
+            });
+          } else {
+            return false;
+          }
+          return true;
+        });
       } else if (k == "tiers") {
         Object(v, sp, [&](const std::string& tk, const json& tv, const std::string& tp) {
           Color* col = nullptr;
@@ -837,6 +866,19 @@ json StyleToJson(const Style& s) {
                 {"unlock", s.sound.unlock},   {"progress", s.sound.progress},
                 {"bronze", s.sound.bronze},   {"silver", s.sound.silver},
                 {"gold", s.sound.gold},       {"platinum", s.sound.platinum}};
+  json viewer = {{"key", s.viewer.key}, {"pad", s.viewer.pad}, {"buttons", s.viewer.buttons},
+                 {"scale", s.viewer.scale}};
+  json vc = json::object();
+  auto opt = [&](const char* name, const std::optional<Color>& c) {
+    if (c) vc[name] = ColorToHex(*c);
+  };
+  opt("backdrop", s.viewer.backdrop);
+  opt("panel", s.viewer.panel);
+  opt("accent", s.viewer.accent);
+  opt("text", s.viewer.text);
+  opt("subtext", s.viewer.subtext);
+  if (!vc.empty()) viewer["colors"] = std::move(vc);
+  j["viewer"] = std::move(viewer);
   const auto& t = s.tiers;
   j["tiers"] = {{"bronze", {{"color", ColorToHex(t.bronze)}, {"name", t.bronze_name}}},
                 {"silver", {{"color", ColorToHex(t.silver)}, {"name", t.silver_name}}},

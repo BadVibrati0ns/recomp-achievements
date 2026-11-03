@@ -5,6 +5,7 @@ project(recomp_achievements LANGUAGES C CXX)
 # dependencies beyond the bundled nlohmann/json; every other part is optional.
 #
 #   recomp::achievements           registry, JSON sets, triggers, saves
+#   recomp::achievements_ui_base   styles, popup queues, the software overlay
 #   recomp::achievements_ui        popups (Dear ImGui), styles, sounds (SDL3)
 #   recomp::achievements_xbox      XDBF/SPA reader
 #   recomp::achievements_trophy    PS3 TROPHY.TRP / TROPCONF.SFM reader

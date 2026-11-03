@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -154,6 +155,18 @@ struct TierStyle {
   bool operator==(const TierStyle&) const = default;
 };
 
+// The achievement viewer (overlay.h). Empty strings leave the game's choice;
+// unset colours follow the popups' (panel = unlock background, accent =
+// progress bar fill, text = unlock name, subtext = unlock description).
+struct ViewerStyle {
+  std::string key;      // Toggle key: "F1".."F12", or "none".
+  std::string pad;      // Toggle chord: buttons joined by '+', e.g. "start+lb", or "none".
+  std::string buttons;  // Button labels: "xbox" or "playstation".
+  float scale = 1.0f;   // On top of the display-height scale.
+  std::optional<Color> backdrop, panel, accent, text, subtext;
+  bool operator==(const ViewerStyle&) const = default;
+};
+
 struct Style {
   std::string theme = "minimal";  // Built-in theme this style started from.
   float scale = 1.0f;
@@ -175,6 +188,7 @@ struct Style {
 
   SoundStyle sound;
   TierStyle tiers;
+  ViewerStyle viewer;
 
   const Color& TierColor(Tier tier, const Color& fallback) const;
   const std::string& TierName(Tier tier) const;

@@ -69,6 +69,7 @@ applies.
 | `secret`           | object  | `name`, `description`: shown in progress popups of locked secret achievements. |
 | `sound`            | object or bool | Sounds (below). `false` mutes popups. |
 | `tiers`            | object  | Trophy tier colours/names: `"gold": "#E8BD30"` or `"gold": {"color": "#E8BD30", "name": "Gold"}`. |
+| `viewer`           | object  | The software achievement viewer ([overlay](overlay.md)): bindings, labels, size, colours (below). |
 | `platforms`        | object  | Per-platform patches. |
 | `sets`             | object  | Per-set patches, keyed by set id. |
 
@@ -128,6 +129,35 @@ That's the default `text` for progress: `{"title": "{item}", "name": "{name}",
 Popups never show credits; the list window does. A locked secret achievement's
 progress popup shows `secret.name` and its locked description (or
 `secret.description`) and its locked icon instead of its real name.
+
+## Viewer keys (`viewer`)
+
+The achievement viewer drawn by `ui::Overlay` ([overlay.md](overlay.md)) takes its colours from the popups
+of the set it shows, so it matches them without extra settings. These keys change it:
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `key` | string | Keyboard toggle: `"F1"` ... `"F12"`, or `"none"`. Default: the game's choice (`F8`). |
+| `pad` | string | Controller toggle chord, buttons joined by `+`: `"start+lb"` (the default), `"back"`, `"lb+rb"`, `"none"`. PlayStation names work too: `"options+l1"`. |
+| `buttons` | string | Button labels in the hints: `"xbox"` or `"playstation"`. Default: the game's choice. |
+| `scale` | number | Size of the viewer on top of the display-height scale. |
+| `colors` | object | `backdrop` (dims the game), `panel`, `accent` (selection, bars, current tab), `text`, `subtext`. Unset colours follow the popups: panel = unlock `background`, accent = progress `bar_fill`, text = unlock `name`, subtext = unlock `description`. `null` goes back to following them. |
+
+Bindings and labels come from each layer's root and `platforms.custom` (they can't differ per set); colours and `scale` follow
+the set on screen, so `platforms` and `sets` patches can recolour it. A player's global
+`achievements_style.json` can move the viewer to another key in every game:
+
+```json
+{
+  "viewer": {
+    "key": "F10",
+    "pad": "back",
+    "buttons": "playstation",
+    "scale": 1.2,
+    "colors": { "accent": "#4CC9F0", "backdrop": "#000000C0" }
+  }
+}
+```
 
 ## Sounds
 
@@ -287,4 +317,13 @@ Most custom achievements have no icon. They show the game's fallback icon, usual
 the game sets with `PopupUiOptions::fallback_icon` or `IconCache::SetFallbackIcon`. The popups and the
 achievement list both use it. If the game sets no fallback icon, a trophy is drawn instead (or the `badge`
 text, if the style sets one). Games that draw their own popups get the same behaviour from
-`IconCache::GetOrFallback`, and can draw the trophy with `DrawTrophy`.
+`IconCache::GetOrFallback`, and can draw the trophy with `DrawTrophy` (an `ImDrawList` version, and one for
+any `Painter` in `painter.h`).
+
+## Drawing the built-in look with another renderer
+
+`painter.h` holds the built-in popup look written against a few primitives (`Painter`: filled and
+stroked rounded rects, circles, images, text, clipping). `PlacePopup` / `LayoutPopups` do the anchoring,
+stacking and animation, and `DrawPopup` draws one card. The ImGui renderer is an `ImGuiPainter` over an
+`ImDrawList`; the software overlay is a `CanvasPainter` over a `Canvas`. A game with its own 2D API can
+implement `Painter` and get the same popups.

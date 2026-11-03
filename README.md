@@ -12,6 +12,9 @@ list of its own.
 - **Copies public RetroAchievements lists:** names, descriptions, points, badges, and credit to the original authors. The recomp never connects to RetroAchievements, which doesn't support recomps. Each recomp adds its own unlock conditions, and can write them in RetroAchievements' condition syntax to be checked against guest memory.
 - **Custom achievements, JSON first:** a game or a mod writes its own list in a hand-writable JSON format, with built-in triggers for stats, events, checklists and counts, plus types the game defines.
 - **Popups:** unlock popups and progress popups (for example "Kickflip 3/14"), with sounds synthesized in the style of each platform. Original console sounds and artwork aren't included. Games and players can override any style or sound with JSON and WAV files. Players can set preferences once for every game, in `%APPDATA%\recomp-achievements` on Windows or `~/.config/recomp-achievements` elsewhere.
+- **An achievement viewer for any renderer:** `ui::Overlay` draws the achievement list and the popups in
+  software into one image the game blends over its frame, so games without Dear ImGui (SDL2, a PSP
+  recomp's Vulkan shim, ...) get the same UI. F8 or Start + LB opens it.
 - **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
   in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
@@ -22,7 +25,7 @@ list of its own.
 |---|---|---|
 | `recomp::achievements` | Registry, JSON sets, triggers, saves | nothing (nlohmann/json is bundled) |
 | `recomp::achievements_ui` | Popups, list window, styles, sounds, icons | Dear ImGui and SDL3 targets (each optional) |
-| `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding | nothing |
+| `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding, and the software overlay (viewer + popups, `Canvas`, fonts) | nothing (stb_truetype and DejaVu Sans are bundled) |
 | `recomp::achievements_xbox` | XDBF / SPA reader, title update search | nothing |
 | `recomp::achievements_trophy` | `TROPHY.TRP` / `TROPCONF.SFM` reader, sceNpTrophy backend | nothing |
 | `recomp::achievements_memory` | Memory triggers in RetroAchievements' condition syntax | nothing (a subset of rcheevos v11.6.0 is bundled) |
@@ -44,7 +47,8 @@ path. Compile these sources and set these defines:
 | Part | Sources | Defines |
 |---|---|---|
 | core | `src/system.cpp`, `src/json_format.cpp` | none |
-| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp` | none |
+| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `overlay.cpp` | none |
+| UI, fonts | `DejaVuSans.cpp`, `DejaVuSans-Bold.cpp`, generated from `assets/fonts` with `cmake -DINPUT=assets/fonts/DejaVuSans.ttf -DOUTPUT=DejaVuSans.cpp -DSYMBOL=kDejaVuSans -P cmake/embed_file.cmake` (and `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`) | or none of them and `RECOMP_ACH_NO_EMBEDDED_FONTS=1`; then pass `OverlayOptions::font` |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
 | UI, ImGui | `src/ui/imgui_renderer.cpp`, `achievement_list.cpp`, `popup_ui.cpp` | none (needs `imgui.h` on the include path) |
 | Xbox 360 | `src/sources/xdbf.cpp`, `xam.cpp` | none |
@@ -101,6 +105,7 @@ A minimal set file:
 
 - [JSON set format](docs/json-format.md) ([schema](schema/achievement-set.schema.json))
 - [Popup styles and sounds](docs/styling.md)
+- [Achievement overlay without ImGui](docs/overlay.md)
 - [Xbox 360 / rexglue](docs/xbox360.md)
 - [PS3 trophies](docs/ps3.md)
 - [RetroAchievements lists](docs/retroachievements.md) and the [import tool](tools/README.md)
@@ -117,20 +122,25 @@ python3 -m unittest discover -s tools/tests
 
 Everything builds offline.
 
-Games that draw their own popups (no Dear ImGui) link `recomp::achievements_ui_base`, feed a
-`NotificationCenter` and draw its `Active()` popups. WAV overrides and PNG icons decode without SDL, and
-`SetSingleSlot(true)` keeps unlock and progress popups to one on screen at a time.
+Games without Dear ImGui link `recomp::achievements_ui_base` and use `ui::Overlay`: pass a few input
+states each frame, call `Frame()`, and when it returns true upload `image()` and blend it over the frame
+([docs/overlay.md](docs/overlay.md)). Games that draw their own popups feed a `NotificationCenter` and draw
+its `Active()` popups, or implement `ui::Painter` to get the built-in look. WAV overrides and PNG icons
+decode without SDL, and `SetSingleSlot(true)` keeps unlock and progress popups to one on screen at a time.
 
 ## License
 
 [0BSD](LICENSE) (Zero-Clause BSD): use it for anything, no attribution needed. Bundled code keeps its
-own licence: nlohmann/json (MIT), the rcheevos subset (MIT, `third_party/rcheevos/LICENSE`) and
-stb_image (MIT or public domain).
+own licence: nlohmann/json (MIT), the rcheevos subset (MIT, `third_party/rcheevos/LICENSE`),
+stb_image and stb_truetype (MIT or public domain) and the DejaVu Sans fonts (Bitstream Vera licence,
+DejaVu changes public domain, `assets/fonts/LICENSE`).
 
 ## Credits
 
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT) is bundled in `third_party/`.
 - [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT) evaluates memory conditions; its
   condition evaluator is bundled in `third_party/rcheevos`, without any of its network code.
-- [stb_image](https://github.com/nothings/stb) (MIT or public domain) decodes icons without SDL.
+- [stb_image](https://github.com/nothings/stb) (MIT or public domain) decodes icons without SDL, and
+  stb_truetype from the same collection rasterises the overlay's text.
+- [DejaVu Sans](https://dejavu-fonts.github.io/) is the overlay's bundled font.
 - Imported RetroAchievements lists credit their authors in each set file. The text and badge art belong to those authors and to RetroAchievements.

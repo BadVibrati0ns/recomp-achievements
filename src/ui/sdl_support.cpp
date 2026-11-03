@@ -80,10 +80,63 @@ bool InstallSdlWavLoader(SoundBank& bank) {
   return true;
 }
 
+bool FillOverlayInput(OverlayInput& in, const bool* keys, SDL_Gamepad* pad) {
+  if (keys) {
+    for (int i = 1; i <= 12; ++i) in.f[i] = keys[SDL_SCANCODE_F1 + (i - 1)];
+    in.up = keys[SDL_SCANCODE_UP];
+    in.down = keys[SDL_SCANCODE_DOWN];
+    in.left = keys[SDL_SCANCODE_LEFT];
+    in.right = keys[SDL_SCANCODE_RIGHT];
+    in.enter = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER];
+    in.space = keys[SDL_SCANCODE_SPACE];
+    in.escape = keys[SDL_SCANCODE_ESCAPE];
+    in.backspace = keys[SDL_SCANCODE_BACKSPACE];
+    in.page_up = keys[SDL_SCANCODE_PAGEUP];
+    in.page_down = keys[SDL_SCANCODE_PAGEDOWN];
+    in.home = keys[SDL_SCANCODE_HOME];
+    in.end = keys[SDL_SCANCODE_END];
+    in.tab = keys[SDL_SCANCODE_TAB];
+    in.shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+  }
+  if (pad) {
+    auto b = [&](SDL_GamepadButton button) { return SDL_GetGamepadButton(pad, button); };
+    auto axis = [&](SDL_GamepadAxis a) { return SDL_GetGamepadAxis(pad, a) / 32767.0f; };
+    // SDL names face buttons by position, which is what the hints show.
+    in.pad_a = b(SDL_GAMEPAD_BUTTON_SOUTH);
+    in.pad_b = b(SDL_GAMEPAD_BUTTON_EAST);
+    in.pad_x = b(SDL_GAMEPAD_BUTTON_WEST);
+    in.pad_y = b(SDL_GAMEPAD_BUTTON_NORTH);
+    in.pad_lb = b(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    in.pad_rb = b(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    in.pad_start = b(SDL_GAMEPAD_BUTTON_START);
+    in.pad_back = b(SDL_GAMEPAD_BUTTON_BACK);
+    in.pad_up = b(SDL_GAMEPAD_BUTTON_DPAD_UP);
+    in.pad_down = b(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    in.pad_left = b(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+    in.pad_right = b(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    in.pad_lx = axis(SDL_GAMEPAD_AXIS_LEFTX);
+    in.pad_ly = axis(SDL_GAMEPAD_AXIS_LEFTY);
+    in.pad_ry = axis(SDL_GAMEPAD_AXIS_RIGHTY);
+  }
+  return true;
+}
+
+ButtonLabels ButtonLabelsFor(SDL_Gamepad* pad) {
+  if (!pad) return ButtonLabels::kXbox;
+  switch (SDL_GetGamepadType(pad)) {
+    case SDL_GAMEPAD_TYPE_PS3:
+    case SDL_GAMEPAD_TYPE_PS4:
+    case SDL_GAMEPAD_TYPE_PS5: return ButtonLabels::kPlayStation;
+    default: return ButtonLabels::kXbox;
+  }
+}
+
 #else
 
 bool InstallSdlImageDecoder(IconCache&) { return false; }
 bool InstallSdlWavLoader(SoundBank&) { return false; }
+bool FillOverlayInput(OverlayInput&, const bool*, SDL_Gamepad*) { return false; }
+ButtonLabels ButtonLabelsFor(SDL_Gamepad*) { return ButtonLabels::kXbox; }
 
 #endif
 
