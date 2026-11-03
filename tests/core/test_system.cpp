@@ -1,5 +1,6 @@
 // The registry, trigger engine, saves and listeners.
 
+#include <fstream>
 #include <atomic>
 #include <ctime>
 #include <mutex>
@@ -915,4 +916,56 @@ TEST(record_value_with_total_overrides_the_bar) {
   // Reset drops the override with the progress.
   sys.Reset({"g:measured"});
   CHECK_EQ(sys.Snapshot()[0].progress_total, 0u);
+}
+
+TEST(progress_popups_option) {
+  System sys;
+  Achievement quiet = Count("quiet", "combo", 5, /*distinct=*/false);
+  quiet.trigger.params["progress_popups"] = false;
+  Achievement every2 = Count("every2", "combo", 5, /*distinct=*/false);
+  every2.trigger.params["progress_popups"] = 2;
+  Achievement list = Checklist("list", "trick", {"a", "b", "c"});
+  list.trigger.params["progress_popups"] = false;
+  sys.AddSet(Set("g", {quiet, every2, list}));
+  Recorder rec;
+  rec.Attach(sys);
+
+  for (int i = 0; i < 5; ++i) sys.ReportEvent("combo");
+  sys.ReportEvent("trick", "a");
+  sys.ReportEvent("trick", "b");
+  sys.ReportEvent("trick", "c");
+  // No steps for "quiet" or "list", steps 2 and 4 for "every2"; every unlock still pops.
+  CHECK_EQ(rec.log, (Log{"progress:g:every2:", "progress:g:every2:", "unlock:g:quiet", "unlock:g:every2",
+                         "unlock:g:list"}));
+  CHECK_EQ(sys.GetProgress("g:quiet")->count, 5u);
+}
+
+TEST(load_directory_reports_errors) {
+  const auto dir = ::test::TempDir("load_dir_errors");
+  std::ofstream(dir / "good.achievements.json") << R"({"achievements": [{"id": "a", "name": "A"}]})";
+  std::ofstream(dir / "typo.achievements.json")
+      << R"({"achievements": [{"id": "b", "name": "B", "progress_bar": false}]})";
+  std::ofstream(dir / "broken.achievements.json") << "{ not json";
+  System sys;
+  std::vector<std::string> errors;
+  CHECK_EQ(sys.LoadDirectory(dir, &errors), 1u);
+  CHECK_EQ(errors.size(), 2u);
+  bool typo = false, broken = false;
+  for (const auto& e : errors) {
+    typo |= e.find("typo.achievements.json") != std::string::npos && e.find("progress_bar") != std::string::npos;
+    broken |= e.find("broken.achievements.json") != std::string::npos;
+  }
+  CHECK(typo);
+  CHECK(broken);
+  CHECK_EQ(System().LoadDirectory(dir), 1u);  // Without a vector the bad files are just skipped.
+}
+
+TEST(progress_popups_from_json) {
+  System sys;
+  std::string error;
+  CHECK(sys.LoadSetJson(R"({"achievements": [{"id": "c", "name": "Fifty Combos",
+      "trigger": {"type": "count", "event": "combo", "threshold": 50, "distinct": false, "progress_popups": 10}}]})",
+                        "my_game.achievements.json", &error));
+  const Achievement* a = sys.Find("my_game:c");
+  CHECK(a && a->trigger.params.value("progress_popups", 0) == 10);
 }

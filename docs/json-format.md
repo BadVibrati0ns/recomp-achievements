@@ -112,6 +112,10 @@ so game-defined triggers can carry their own data:
 `"progress_bar": false` hides the progress bar the UI would otherwise show
 (for a speed record, say, where "31 / 60" means little).
 
+`"progress_popups"` sets how often a checklist or count pops a progress popup: `true` (the default) on
+every step, `false` never, or a number N on every Nth step. The unlock popup always shows. For "land 50
+combos", `"progress_popups": 10` pops at 10, 20, 30 and 40. Both keys go inside `trigger`.
+
 ## Credits
 
 Either a name, or an object with `name` (required), `role` and `url`:

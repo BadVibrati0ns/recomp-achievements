@@ -57,7 +57,9 @@ class System {
   // Loads every *.achievements.json file in dir and, in each subfolder,
   // achievements.json or the "achievements" array of pack.json. Folders
   // ending in .disabled/.off/.bak/.tmp are skipped. Returns sets loaded.
-  size_t LoadDirectory(const std::filesystem::path& dir);
+  // Files that fail to load are skipped; pass `errors` to get one message per
+  // file (disabled packs aren't errors).
+  size_t LoadDirectory(const std::filesystem::path& dir, std::vector<std::string>* errors = nullptr);
   void RemoveSet(std::string_view set_id);
   void ClearSets();
 

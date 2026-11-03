@@ -416,6 +416,19 @@ struct System::Impl {
   // With out == nullptr nothing changes; the return value says whether
   // anything would, so callers can sync the profile only when it matters.
 
+  // trigger.params.progress_popups: true (default) pops one per step, false
+  // none, a number N every Nth step.
+  static bool WantsProgressPopup(const Trigger& trigger, uint32_t current) {
+    const auto it = trigger.params.find("progress_popups");
+    if (it == trigger.params.end()) return true;
+    if (it->is_boolean()) return it->get<bool>();
+    if (it->is_number_unsigned() || it->is_number_integer()) {
+      const int64_t every = it->get<int64_t>();
+      return every > 0 && current % static_cast<uint64_t>(every) == 0;
+    }
+    return true;
+  }
+
   bool AddItems(Loc loc, std::vector<std::string> items, Outbox* out) {
     if (items.empty()) return false;
     if (!out) return true;
@@ -431,7 +444,10 @@ struct System::Impl {
       } else {
         p.completed.push_back(item);
       }
-      if (needed == 0 || CurrentCount(a, p) < needed) QueueProgress(loc, std::move(item), *out);
+      const uint32_t current = CurrentCount(a, p);
+      if ((needed == 0 || current < needed) && WantsProgressPopup(a.trigger, current)) {
+        QueueProgress(loc, std::move(item), *out);
+      }
     }
     if (needed > 0 && CurrentCount(a, p) >= needed) MarkUnlocked(loc, *out);
     return true;
@@ -582,7 +598,7 @@ bool System::LoadSetJson(std::string_view json_text, const fs::path& origin, std
   return true;
 }
 
-size_t System::LoadDirectory(const fs::path& dir) {
+size_t System::LoadDirectory(const fs::path& dir, std::vector<std::string>* errors) {
   std::error_code ec;
   std::vector<fs::path> files, folders;
   for (const auto& entry : fs::directory_iterator(dir, ec)) {
@@ -604,10 +620,15 @@ size_t System::LoadDirectory(const fs::path& dir) {
 
   size_t loaded = 0;
   for (const auto& file : files) {
-    if (LoadSetFile(file)) ++loaded;
+    std::string error;
+    if (LoadSetFile(file, &error)) {
+      ++loaded;
+    } else if (errors && !error.empty()) {
+      errors->push_back(std::move(error));
+    }
   }
   for (const auto& folder : folders) {
-    for (auto& set : detail::LoadPackFolder(folder, nullptr)) {
+    for (auto& set : detail::LoadPackFolder(folder, errors)) {
       AddSet(std::move(set));
       ++loaded;
     }
