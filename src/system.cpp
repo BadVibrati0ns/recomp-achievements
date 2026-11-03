@@ -575,6 +575,13 @@ bool System::LoadSetFile(const fs::path& path, std::string* error) {
   return true;
 }
 
+bool System::LoadSetJson(std::string_view json_text, const fs::path& origin, std::string* error) {
+  AchievementSet set;
+  if (!detail::LoadSetText(json_text, origin, set, error)) return false;
+  AddSet(std::move(set));
+  return true;
+}
+
 size_t System::LoadDirectory(const fs::path& dir) {
   std::error_code ec;
   std::vector<fs::path> files, folders;

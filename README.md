@@ -33,6 +33,24 @@ add_subdirectory(third_party/recomp-achievements)
 target_link_libraries(my_game PRIVATE recomp::achievements recomp::achievements_ui)
 ```
 
+### Without CMake
+
+Every part is plain C++20 (the rexglue binding is C++23), with `include/` and `third_party/` on the include
+path. Compile these sources and set these defines:
+
+| Part | Sources | Defines |
+|---|---|---|
+| core | `src/system.cpp`, `src/json_format.cpp` | none |
+| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp` | none |
+| UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
+| UI, ImGui | `src/ui/imgui_renderer.cpp`, `achievement_list.cpp`, `popup_ui.cpp` | none (needs `imgui.h` on the include path) |
+| Xbox 360 | `src/sources/xdbf.cpp`, `xam.cpp` | none |
+| PS3 | `src/sources/trophy.cpp`, `trophy_context.cpp`, `mini_xml.cpp` | none |
+| rexglue | `src/rexglue/rexglue_binding.cpp` | `RECOMP_ACH_REXGLUE_KERNEL_HOOKS=1` with the patch, `0` for stock rexglue |
+| memory | `src/memory/*.cpp`, plus rcheevos' `alloc`, `condition`, `condset`, `memref`, `operand`, `trigger`, `value`, `rc_compat` and `rc_util` | `RC_DISABLE_LUA` |
+
+CMake also defines `RECOMP_ACH_HAS_IMGUI` for consumers, but no SDK source reads it.
+
 ## Quick start
 
 ```cpp

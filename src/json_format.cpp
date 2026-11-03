@@ -724,6 +724,18 @@ bool LoadSetFile(const fs::path& path, AchievementSet& out, std::string* error) 
   return LoadAnyDocument(doc, path, out, error);
 }
 
+bool LoadSetText(std::string_view text, const fs::path& origin, AchievementSet& out,
+                 std::string* error) {
+  json doc;
+  try {
+    doc = json::parse(text, nullptr, /*allow_exceptions=*/true, /*ignore_comments=*/true);
+  } catch (const json::parse_error& e) {
+    if (error) *error = PathString(origin) + ": invalid JSON: " + e.what();
+    return false;
+  }
+  return LoadAnyDocument(doc, origin, out, error);
+}
+
 std::vector<AchievementSet> LoadPackFolder(const fs::path& folder, std::vector<std::string>* errors) {
   std::vector<AchievementSet> sets;
   std::error_code ec;

@@ -87,6 +87,21 @@ class RexglueBinding {
   std::shared_ptr<State> state_;
 };
 
+// The title's achievement data without binding anything: the executable
+// module's XDBF plus the best spa.bin under options.content_roots (when
+// options.load_title_update). Only stock rexglue APIs, so recomps that bridge
+// XAM themselves can build their set from it (ToAchievementSet). Call once
+// the executable module is loaded.
+struct RexglueTitle {
+  xbox::XdbfTitle title;
+  std::filesystem::path title_update_path;  // Empty when none was found.
+  uint32_t title_id = 0;
+};
+RexglueTitle LoadRexglueTitle(rex::system::KernelState* kernel_state, const RexglueOptions& options = {});
+// XdbfSetOptions from RexglueOptions (language from the user_language cvar
+// when options.language is 0).
+xbox::XdbfSetOptions RexglueSetOptions(std::string set_id, const RexglueOptions& options = {});
+
 // Call once the executable module is loaded (title_xdbf() reads it). Returns
 // null when kernel_state is null.
 std::unique_ptr<RexglueBinding> BindRexglue(rex::system::KernelState* kernel_state, System& system,

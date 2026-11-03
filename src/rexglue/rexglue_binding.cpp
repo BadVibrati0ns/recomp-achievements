@@ -48,51 +48,49 @@ bool ReadTitleXdbf(rex::system::KernelState* ks, xbox::XdbfDatabase& out, uint32
   return bytes && out.Load(std::span<const uint8_t>(bytes, size));
 }
 
-bool LoadInto(RexglueBinding::State& s) {
-  xbox::XdbfTitle title;
+RexglueTitle LoadTitle(rex::system::KernelState* ks, const RexglueOptions& options) {
+  RexglueTitle out;
+  if (!ks) return out;
   xbox::XdbfDatabase base;
-  uint32_t title_id = 0;
-  if (ReadTitleXdbf(s.kernel_state, base, title_id)) {
-    title.SetBase(std::move(base));
+  if (ReadTitleXdbf(ks, base, out.title_id)) {
+    out.title.SetBase(std::move(base));
   } else {
-    title_id = s.kernel_state->title_id();
+    out.title_id = ks->title_id();
     REXLOG_WARN("recomp-achievements: no title XDBF (is the executable module loaded?)");
   }
 
-  std::filesystem::path tu_path;
-  if (s.options.load_title_update) {
-    auto roots = s.options.content_roots;
+  if (options.load_title_update) {
+    auto roots = options.content_roots;
     if (roots.empty()) {
       std::error_code ec;
       const auto cwd = std::filesystem::current_path(ec);
       roots = {cwd, cwd / "game"};
     }
-    tu_path = xbox::FindTitleUpdateSpa(roots, title_id);
+    auto tu_path = xbox::FindTitleUpdateSpa(roots, out.title_id);
     if (!tu_path.empty()) {
       xbox::XdbfDatabase tu;
       std::string error;
       if (tu.LoadFile(tu_path, &error)) {
-        title.SetTitleUpdate(std::move(tu));
-        REXLOG_INFO("recomp-achievements: title update database {}", tu_path.string());
+        out.title.SetTitleUpdate(std::move(tu));
+        out.title_update_path = std::move(tu_path);
+        REXLOG_INFO("recomp-achievements: title update database {}", out.title_update_path.string());
       } else {
         REXLOG_WARN("recomp-achievements: {}: {}", tu_path.string(), error);
-        tu_path.clear();
       }
     }
   }
+  return out;
+}
 
-  s.title = std::move(title);
-  s.tu_path = std::move(tu_path);
-  s.title_id = title_id;
+bool LoadInto(RexglueBinding::State& s) {
+  RexglueTitle loaded = LoadTitle(s.kernel_state, s.options);
+  s.title = std::move(loaded.title);
+  s.tu_path = std::move(loaded.title_update_path);
+  s.title_id = loaded.title_id;
   if (s.options.add_set && s.title.valid()) {
-    xbox::XdbfSetOptions set_options;
-    set_options.set_id = s.set_id;
-    set_options.language = ResolveLanguage(s.options.language);
-    set_options.category = s.options.category;
-    set_options.title = s.options.title;
-    AchievementSet set = s.title.ToAchievementSet(set_options);
+    AchievementSet set = s.title.ToAchievementSet(RexglueSetOptions(s.set_id, s.options));
     REXLOG_INFO("recomp-achievements: {} achievements for {:08X} as set '{}'",
-                set.achievements.size(), title_id, s.set_id);
+                set.achievements.size(), s.title_id, s.set_id);
     s.system->AddSet(std::move(set));
   }
   return s.title.valid();
@@ -169,6 +167,19 @@ bool RexglueBinding::hooks_kernel() const { return RECOMP_ACH_REXGLUE_KERNEL_HOO
 
 std::span<const uint8_t> RexglueBinding::ResolveIcon(std::string_view ref) const {
   return state_->title.ResolveIcon(ref);
+}
+
+RexglueTitle LoadRexglueTitle(rex::system::KernelState* kernel_state, const RexglueOptions& options) {
+  return LoadTitle(kernel_state, options);
+}
+
+xbox::XdbfSetOptions RexglueSetOptions(std::string set_id, const RexglueOptions& options) {
+  xbox::XdbfSetOptions set_options;
+  set_options.set_id = std::move(set_id);
+  set_options.language = ResolveLanguage(options.language);
+  set_options.category = options.category;
+  set_options.title = options.title;
+  return set_options;
 }
 
 std::unique_ptr<RexglueBinding> BindRexglue(rex::system::KernelState* kernel_state, System& system,

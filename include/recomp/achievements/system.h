@@ -48,6 +48,12 @@ class System {
   void AddSet(AchievementSet set);
   // Loads one JSON set file (schema/achievement-set.schema.json).
   bool LoadSetFile(const std::filesystem::path& path, std::string* error = nullptr);
+  // The same from JSON text, e.g. a set embedded in the executable. origin
+  // stands in for the file: it names it in errors, supplies the default set
+  // id (from "<id>.achievements.json") and the folder relative icons resolve
+  // from.
+  bool LoadSetJson(std::string_view json, const std::filesystem::path& origin,
+                   std::string* error = nullptr);
   // Loads every *.achievements.json file in dir and, in each subfolder,
   // achievements.json or the "achievements" array of pack.json. Folders
   // ending in .disabled/.off/.bak/.tmp are skipped. Returns sets loaded.

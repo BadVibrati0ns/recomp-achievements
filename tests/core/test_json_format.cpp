@@ -1,6 +1,7 @@
 // The native set format and the save entry format.
 
 #include "json_format.h"
+#include "recomp/achievements/system.h"
 #include "test.h"
 
 using namespace recomp::achievements;
@@ -339,4 +340,28 @@ TEST(points_cap_matches_old_scaling) {
   // All ones over the cap: the old loop gives up rather than zeroing.
   CHECK_EQ(Capped(std::vector<uint32_t>(12, 1), 10), std::vector<uint32_t>(12, 1));
   CHECK_EQ(Capped({600}, 0), std::vector<uint32_t>{600});
+}
+
+TEST(load_set_json_from_memory) {
+  System system;
+  std::string error;
+  const char* text = R"({
+    // Embedded in an executable rather than shipped as a file.
+    "achievements": [
+      { "id": "clear", "name": "Clear", "icon": "icons/clear.png", "trigger": { "event": "stage_clear" } }
+    ]
+  })";
+  CHECK(system.LoadSetJson(text, "assets/my_game.achievements.json", &error));
+  const Achievement* a = system.Find("my_game:clear");
+  CHECK(a != nullptr);
+  if (a) {
+    const AchievementSet* set = system.FindSet("my_game");
+    CHECK(set != nullptr);
+    if (set) CHECK(set->base_dir == std::filesystem::path("assets"));
+  }
+  system.ReportEvent("stage_clear", "1-1");
+  CHECK(system.IsUnlocked("my_game:clear"));
+
+  CHECK(!system.LoadSetJson("{ not json", "assets/bad.achievements.json", &error));
+  CHECK(error.find("bad.achievements.json") != std::string::npos);
 }

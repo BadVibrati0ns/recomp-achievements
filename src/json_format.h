@@ -42,6 +42,9 @@ bool ParsePackDocument(const nlohmann::json& doc, std::string_view folder_name,
 
 // Reads any set file: native, or an old pack's achievements.json/pack.json.
 bool LoadSetFile(const std::filesystem::path& path, AchievementSet& out, std::string* error);
+// The same from text already in memory; origin stands in for the file path.
+bool LoadSetText(std::string_view text, const std::filesystem::path& origin, AchievementSet& out,
+                 std::string* error);
 // Loads a mod folder: its *.achievements.json files, else achievements.json,
 // else pack.json. Problems are appended to errors.
 std::vector<AchievementSet> LoadPackFolder(const std::filesystem::path& folder,
