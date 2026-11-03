@@ -1,0 +1,68 @@
+{
+  "$schema": "../../../../schema/achievement-set.schema.json",
+  "schema": "recomp-achievements/1",
+  "set": {
+    "id": "my_game",
+    "title": "My Game",
+    "platform": "xbox360",
+    "category": "Career",
+    "credits": [{ "name": "EA Black Box", "role": "original" }],
+    "source": { "title_id": "454108E6", "from": "xdbf" }
+  },
+  "achievements": [
+    {
+      "id": "first_board",
+      "platform_id": 15,
+      "name": "Board Owner",
+      "description": "Buy your first board.",
+      "points": 10,
+      "legacy_keys": ["15"]
+    },
+    {
+      "id": "combo",
+      "platform_id": 111,
+      "name": "Combo Breaker",
+      "description": "Chain 10 tricks in one line.",
+      "points": 25,
+      "trigger": { "type": "stat", "stat": "tricks_chained", "threshold": 10 }
+    },
+    {
+      "id": "miracle",
+      "name": "Miracle Worker",
+      "description": "Land a Miracle Whip.",
+      "secret": true,
+      "locked_description": "Land something miraculous.",
+      "points": 20,
+      "trigger": { "event": "trick", "target": "Miracle Whip" }
+    },
+    {
+      "id": "flips",
+      "name": "Flip Book",
+      "description": "Land every core flip trick.",
+      "points": 30,
+      "checklist": ["Kickflip", "Heelflip", "360 Flip"],
+      "trigger": { "type": "checklist", "event": "trick" }
+    },
+    {
+      "id": "spots",
+      "name": "King of the Streets",
+      "description": "Own 16 spots.",
+      "points": 50,
+      "trigger": { "type": "count", "event": "spot_owned", "threshold": 16 }
+    },
+    {
+      "id": "gap",
+      "name": "Stairway Flight",
+      "description": "Clear the plaza stairs.",
+      "points": 15,
+      "icon": "icons/gap.png",
+      "trigger": { "type": "gap", "takeoff": [415, 69, -210], "landing": [415, 65, -181], "radius": 8.5 }
+    },
+    {
+      "id": "credits",
+      "name": "Roll Credits",
+      "points": 5,
+      "trigger": "manual"
+    }
+  ]
+}

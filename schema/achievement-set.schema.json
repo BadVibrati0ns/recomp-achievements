@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/recomp-achievements/recomp-achievements/schema/achievement-set.schema.json",
+  "title": "recomp-achievements set",
+  "description": "One achievement set for a static recompilation (recomp-achievements/1). See docs/json-format.md.",
+  "type": "object",
+  "required": ["achievements"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Path or URL of this schema, for editors." },
+    "schema": {
+      "type": "string",
+      "pattern": "^recomp-achievements/1(\\..*)?$",
+      "description": "Format version. Optional; files without it are read as version 1."
+    },
+    "set": { "$ref": "#/$defs/set" },
+    "achievements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/achievement" }
+    }
+  },
+  "patternProperties": { "^[$_]": true },
+  "additionalProperties": false,
+
+  "$defs": {
+    "set": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique set id; prefixes every achievement key (\"<set id>:<achievement id>\"). Defaults to the file name without .achievements.json."
+        },
+        "title": { "type": "string", "description": "Display name. Defaults to the id." },
+        "platform": {
+          "enum": ["custom", "xbox360", "ps3", "retroachievements"],
+          "default": "custom",
+          "description": "Where the list came from; picks the default popup style and how platform_id is read."
+        },
+        "category": { "type": "string", "description": "Default category for achievements that don't set one." },
+        "points_cap": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "When the points add up to more than this, they are scaled down to exactly this total. 0: no cap."
+        },
+        "credits": { "$ref": "#/$defs/credits" },
+        "source": {
+          "type": "object",
+          "description": "Free-form provenance: game id, URL, export date, tool."
+        }
+      },
+      "patternProperties": { "^[$_]": true },
+      "additionalProperties": false
+    },
+
+    "achievement": {
+      "type": "object",
+      "required": ["name"],
+      "anyOf": [{ "required": ["id"] }, { "required": ["platform_id"] }],
+      "properties": {
+        "id": {
+          "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "integer", "minimum": 0, "maximum": 4294967295 }],
+          "description": "Unique within the set. Saves are keyed by \"<set id>:<id>\", so keep it stable. Defaults to platform_id."
+        },
+        "platform_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "XDBF achievement id, trophy id or RetroAchievements id. 0: none."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "locked_description": {
+          "type": "string",
+          "description": "Shown while locked instead of the description (e.g. for secret achievements)."
+        },
+        "category": { "type": "string", "description": "Defaults to the set's category." },
+        "points": { "type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0 },
+        "tier": { "enum": ["none", "bronze", "silver", "gold", "platinum"], "default": "none" },
+        "secret": { "type": "boolean", "default": false },
+        "display_order": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sort key within the set. Defaults to the position in the file."
+        },
+        "icon": {
+          "type": "string",
+          "description": "Path relative to this file, or \"xdbf:<image id>\", \"trophy:<file>\", \"ra:<badge>\"."
+        },
+        "locked_icon": { "type": "string" },
+        "legacy_keys": {
+          "type": "array",
+          "items": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "integer" }] },
+          "description": "Older save keys to read progress from when the current key isn't saved yet."
+        },
+        "credits": { "$ref": "#/$defs/credits" },
+        "checklist": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Items for a checklist trigger, in display order."
+        },
+        "trigger": { "$ref": "#/$defs/trigger" }
+      },
+      "patternProperties": { "^[$_]": true },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "trigger": { "properties": { "type": { "const": "checklist" } }, "required": ["type"] } }, "required": ["trigger"] },
+          "then": { "required": ["checklist"], "properties": { "checklist": { "minItems": 1 } } }
+        }
+      ]
+    },
+
+    "trigger": {
+      "description": "How the achievement unlocks. A string is shorthand for {\"type\": <string>}. Omitted: manual.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "$ref": "#/$defs/trigger_object" }
+      ]
+    },
+
+    "trigger_object": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "manual, stat, event, checklist, count, memory, or a game-defined type. When omitted it is inferred: stat if \"stat\" is set, memory if \"condition\" is, checklist or event if \"event\" is, else manual.",
+          "examples": ["manual", "stat", "event", "checklist", "count", "memory"]
+        },
+        "stat": { "type": "string", "minLength": 1, "description": "stat: the stat name passed to ReportStat()." },
+        "event": { "type": "string", "minLength": 1, "description": "event, checklist, count: the event name passed to ReportEvent()." },
+        "target": {
+          "type": ["string", "integer"],
+          "description": "event, count: only reports with this target count. Empty or \"any\": every target."
+        },
+        "threshold": { "type": "number", "description": "stat: value to reach. count: how many targets or occurrences." },
+        "distinct": { "type": "boolean", "default": true, "description": "count: count distinct targets (true) or every occurrence (false)." },
+        "condition": { "type": "string", "description": "memory: a RetroAchievements-syntax condition." },
+        "progress_bar": { "type": "boolean", "description": "false hides the progress bar the UI would otherwise show." },
+        "params": { "type": "object", "description": "Extra values for game-defined triggers; merged with any unknown fields." }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "stat" } }, "required": ["type"] }, "then": { "required": ["stat"] } },
+        { "if": { "properties": { "type": { "const": "event" } }, "required": ["type"] }, "then": { "required": ["event"] } },
+        { "if": { "properties": { "type": { "const": "checklist" } }, "required": ["type"] }, "then": { "required": ["event"] } },
+        {
+          "if": { "properties": { "type": { "const": "count" } }, "required": ["type"] },
+          "then": { "required": ["event", "threshold"], "properties": { "threshold": { "minimum": 1 } } }
+        },
+        { "if": { "properties": { "type": { "const": "memory" } }, "required": ["type"] }, "then": { "required": ["condition"] } }
+      ]
+    },
+
+    "credits": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1, "description": "Shorthand for {\"name\": <string>}." },
+          {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "role": { "type": "string", "examples": ["author", "artwork", "port", "original"] },
+              "url": { "type": "string" }
+            },
+            "patternProperties": { "^[$_]": true },
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  }
+}

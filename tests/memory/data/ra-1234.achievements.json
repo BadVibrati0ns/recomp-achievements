@@ -1,0 +1,135 @@
+{
+  "schema": "recomp-achievements/1",
+  "set": {
+    "id": "ra-1234",
+    "title": "Star Quest 64",
+    "platform": "retroachievements",
+    "category": "Star Quest 64",
+    "credits": [
+      {
+        "name": "PixelScribe",
+        "role": "author",
+        "url": "https://retroachievements.org/user/PixelScribe"
+      },
+      {
+        "name": "memwatch",
+        "role": "author",
+        "url": "https://retroachievements.org/user/memwatch"
+      },
+      {
+        "name": "Señor Bits",
+        "role": "author",
+        "url": "https://retroachievements.org/user/Se%C3%B1or%20Bits"
+      },
+      {
+        "name": "RetroAchievements",
+        "role": "source",
+        "url": "https://retroachievements.org/game/1234",
+        "_note": "Achievement list written by the RetroAchievements community; titles, descriptions and badges belong to their authors."
+      }
+    ],
+    "source": {
+      "kind": "retroachievements",
+      "game_id": 1234,
+      "console": "Nintendo 64",
+      "console_id": 2,
+      "url": "https://retroachievements.org/game/1234",
+      "fetched": "2026-11-03T12:00:00Z",
+      "achievement_flags": 3,
+      "tool": "ra_import.py 1.0"
+    }
+  },
+  "achievements": [
+    {
+      "id": "90001",
+      "platform_id": 90001,
+      "name": "First Steps",
+      "description": "Complete the tutorial",
+      "points": 5,
+      "display_order": 1,
+      "icon": "ra:301001",
+      "locked_icon": "ra:301001_lock",
+      "credits": [
+        {
+          "name": "PixelScribe",
+          "role": "author",
+          "url": "https://retroachievements.org/user/PixelScribe"
+        }
+      ],
+      "_ra_type": "progression",
+      "_ra_logic_md5": "9cf20a3641b907415c708a8a4e245fbf",
+      "trigger": {
+        "type": "manual"
+      }
+    },
+    {
+      "id": "90002",
+      "platform_id": 90002,
+      "name": "Castle Cleared",
+      "description": "Defeat the castle guardian",
+      "points": 10,
+      "display_order": 2,
+      "icon": "ra:301002",
+      "locked_icon": "ra:301002_lock",
+      "credits": [
+        {
+          "name": "PixelScribe",
+          "role": "author",
+          "url": "https://retroachievements.org/user/PixelScribe"
+        }
+      ],
+      "_ra_type": "win_condition",
+      "_ra_logic_md5": "34770fe98950417cfff4c6d692136ab9",
+      "trigger": {
+        "type": "manual"
+      }
+    },
+    {
+      "id": "90003",
+      "platform_id": 90003,
+      "name": "Ten Star Run",
+      "description": "Collect 10 stars without taking damage",
+      "points": 25,
+      "display_order": 3,
+      "icon": "ra:301003",
+      "locked_icon": "ra:301003_lock",
+      "credits": [
+        {
+          "name": "memwatch",
+          "role": "author",
+          "url": "https://retroachievements.org/user/memwatch"
+        }
+      ],
+      "_ra_logic_md5": "aa02c4f249007c552630fc7f1cc65c75",
+      "trigger": {
+        "type": "memory",
+        "params": {
+          "condition": "M:0xH0040>=10_R:0xH0041=1"
+        }
+      }
+    },
+    {
+      "id": "90004",
+      "platform_id": 90004,
+      "name": "Don't Blink",
+      "description": "Find the hidden room in World 2 before the timer runs out",
+      "points": 50,
+      "display_order": 3,
+      "icon": "ra:301004",
+      "locked_icon": "ra:301004_lock",
+      "credits": [
+        {
+          "name": "Señor Bits",
+          "role": "author",
+          "url": "https://retroachievements.org/user/Se%C3%B1or%20Bits"
+        }
+      ],
+      "_ra_type": "missable",
+      "_ra_logic_md5": "4e947d43a2b43f8b9a2fa6d1630801f8",
+      "trigger": {
+        "type": "manual"
+      }
+    }
+  ],
+  "$comment": "Made by tools/ra_import.py from the fictional fixture tools/tests/fixtures/game_1234_pascal.json, then given one memory trigger."
+}

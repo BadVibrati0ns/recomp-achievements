@@ -1,0 +1,42 @@
+{
+  "achievements": {
+    "10": {
+      "unlock_time": 1791923180,
+      "unlocked": true
+    },
+    "112": {
+      "completed_tricks": [
+        "spotdc6ba2c5bf4a557a",
+        "spot621b1c2dbfa36d74",
+        "spot53e21374dd2ddb29",
+        "spot70abb4d7f2afcf24"
+      ],
+      "unlock_time": 0,
+      "unlocked": false
+    },
+    "Sample Achievement Mod:sample_air_time": {
+      "best_stat": 1.7333323955535889,
+      "unlock_time": 1792116599,
+      "unlocked": true
+    },
+    "Sample Achievement Mod:sample_bones_broken": {
+      "best_stat": 1.0,
+      "unlock_time": 0,
+      "unlocked": false
+    },
+    "Sample Achievement Mod:sample_other_master": {
+      "completed_tricks": [
+        "Nose Manual",
+        "Manual",
+        "Boneless"
+      ],
+      "unlock_time": 0,
+      "unlocked": false
+    },
+    "Online:1": {
+      "unlock_time": 1792000000,
+      "unlocked": true
+    }
+  },
+  "profile": "player"
+}
