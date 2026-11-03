@@ -135,8 +135,10 @@ float ScaleFor(const Style& st, ImVec2 size) {
   return std::clamp(size.y / std::max(1.0f, st.reference_height), st.min_scale, st.max_scale) * st.scale;
 }
 
-// Fallback trophy cup, drawn when there is no icon and no badge text.
-void DrawCup(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
+}  // namespace
+
+// The trophy drawn when an achievement has no icon and no fallback icon.
+void DrawTrophy(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
   dl->AddRectFilled(ImVec2(c.x - 0.42f * r, c.y - 0.5f * r), ImVec2(c.x + 0.42f * r, c.y + 0.1f * r), col,
                     0.4f * r, ImDrawFlags_RoundCornersBottom);
   dl->AddCircle(ImVec2(c.x - 0.45f * r, c.y - 0.25f * r), 0.18f * r, col, 12, 0.08f * r);
@@ -145,8 +147,6 @@ void DrawCup(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
   dl->AddRectFilled(ImVec2(c.x - 0.3f * r, c.y + 0.32f * r), ImVec2(c.x + 0.3f * r, c.y + 0.46f * r), col,
                     0.05f * r);
 }
-
-}  // namespace
 
 ImGuiRenderer::ImGuiRenderer(NotificationCenter& center, IconCache* icons) : center_(center), icons_(icons) {}
 
@@ -321,7 +321,7 @@ void ImGuiRenderer::DrawDefault(ImDrawList* dl, const ActivePopup& a, const Popu
         dl->AddText(bold, bs, ImVec2(ic.x - ext.x * 0.5f, ic.y - ext.y * 0.5f), Col(c.name, alpha),
                     p.badge.c_str());
       } else {
-        DrawCup(dl, ic, r.icon * 0.5f, Col(c.name, alpha * 0.9f));
+        DrawTrophy(dl, ic, r.icon * 0.5f, Col(c.name, alpha * 0.9f));
       }
     }
     if (c.icon_border.a > 0.0f) {
@@ -422,8 +422,8 @@ void ImGuiRenderer::Draw(ImDrawList* dl, ImVec2 origin, ImVec2 size, float dt) {
   for (size_t i = 0; i < active.size(); ++i) {
     const ActivePopup& a = active[i];
     PopupLayout L = layouts[i];
-    if (icons_ && a.n.popup().lines.icon && !a.n.icon.empty())
-      L.icon = icons_->Get(a.n.icon, a.n.set_id, a.n.icon_base_dir);
+    if (icons_ && a.n.popup().lines.icon)
+      L.icon = icons_->GetOrFallback(a.n.icon, a.n.set_id, a.n.icon_base_dir);
     if (custom_ && custom_(dl, a, L)) continue;
     DrawDefault(dl, a, L);
   }

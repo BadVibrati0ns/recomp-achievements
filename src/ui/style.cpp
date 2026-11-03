@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <set>
@@ -244,7 +245,6 @@ Style Xbox360Theme() {
   u.border_thickness = 0.0f;
   u.icon_size = 48.0f;
   u.icon_shape = IconShape::kCircle;
-  u.badge = "G";
   u.colors.background = Color::Rgba(28, 28, 30, 238);
   u.colors.border = Color::Rgba(255, 255, 255, 0);
   u.colors.title = Color::Rgba(225, 225, 225);
@@ -336,7 +336,6 @@ Style RetroTheme() {
   u.border_thickness = 2.0f;
   u.icon_size = 56.0f;
   u.icon_rounding = 0.0f;
-  u.badge = "*";
   u.colors.background = Color::Rgba(22, 22, 40, 240);
   u.colors.border = Color::Rgba(233, 196, 106, 255);
   u.colors.title = Color::Rgba(233, 196, 106);
@@ -422,7 +421,6 @@ Style ClassicTheme() {
   u.border_thickness = 1.5f;
   u.icon_size = 48.0f;
   u.icon_rounding = 6.0f;
-  u.badge = "G";
   u.colors.background = Color::Rgba(10, 14, 16, 238);
   u.colors.border = Color::Rgba(213, 235, 10, 220);
   u.colors.shadow = Color::Rgba(0, 0, 0, 140);
@@ -849,6 +847,59 @@ json StyleToJson(const Style& s) {
 
 // ---- StyleManager --------------------------------------------------------------
 
+namespace {
+
+std::filesystem::path EnvPath(const char* name) {
+  const char* value = std::getenv(name);
+  return value && *value ? std::filesystem::path(value) : std::filesystem::path();
+}
+
+// Written once so players can find the file; every setting is commented out.
+constexpr const char* kGlobalStyleTemplate = R"(// Achievement popups for every game that uses recomp-achievements.
+// Settings here override each game's own style; a game's own
+// achievements_style.json (in its user folder) overrides these.
+// Uncomment what you want. The full list is in the SDK's docs/styling.md:
+// https://github.com/BadVibrati0ns/recomp-achievements/blob/main/docs/styling.md
+{
+  // "theme": "xbox360",           // xbox360, ps3, retro, minimal, classic, or "auto"
+  // "scale": 1.0,
+  // "sound": { "enabled": true, "volume": 0.8 },
+  // "unlock": { "anchor": "bottom_center" },
+  // "progress": { "enabled": true }
+  // Replacement sounds go in the sounds folder next to this file:
+  // unlock.wav, progress.wav, unlock_gold.wav, or <builtin name>.wav.
+}
+)";
+
+}  // namespace
+
+std::filesystem::path GlobalConfigDir() {
+  if (auto dir = EnvPath("RECOMP_ACHIEVEMENTS_CONFIG_DIR"); !dir.empty()) return dir;
+#if defined(_WIN32)
+  if (auto appdata = EnvPath("APPDATA"); !appdata.empty()) return appdata / "recomp-achievements";
+  if (auto profile = EnvPath("USERPROFILE"); !profile.empty())
+    return profile / "AppData" / "Roaming" / "recomp-achievements";
+#else
+  if (auto xdg = EnvPath("XDG_CONFIG_HOME"); !xdg.empty() && xdg.is_absolute()) return xdg / "recomp-achievements";
+  if (auto home = EnvPath("HOME"); !home.empty()) return home / ".config" / "recomp-achievements";
+#endif
+  return {};
+}
+
+std::filesystem::path EnsureGlobalConfigDir() {
+  const auto dir = GlobalConfigDir();
+  if (dir.empty()) return {};
+  std::error_code ec;
+  std::filesystem::create_directories(dir / "sounds", ec);
+  if (ec) return {};
+  const auto file = dir / "achievements_style.json";
+  if (!std::filesystem::exists(file, ec)) {
+    std::ofstream out(file, std::ios::binary);
+    out << kGlobalStyleTemplate;
+  }
+  return dir;
+}
+
 StyleManager::StyleManager() = default;
 StyleManager::~StyleManager() = default;
 
@@ -857,6 +908,21 @@ void StyleManager::SetGameStyle(json style, std::filesystem::path base_dir) {
   game_ = {std::move(style), std::move(base_dir), {}, true};
   cache_.clear();
   ++generation_;
+}
+
+void StyleManager::SetGlobalStyle(json style, std::filesystem::path base_dir) {
+  std::lock_guard lock(mutex_);
+  global_ = {std::move(style), std::move(base_dir), {}, true};
+  cache_.clear();
+  ++generation_;
+}
+
+bool StyleManager::LoadGlobalStyleFile(const std::filesystem::path& path, std::string* error) {
+  std::lock_guard lock(mutex_);
+  const bool ok = LoadFile(global_, path, error);
+  cache_.clear();
+  ++generation_;
+  return ok;
 }
 
 void StyleManager::SetUserStyle(json style, std::filesystem::path base_dir) {
@@ -911,6 +977,7 @@ bool StyleManager::Reload(std::string* error) {
   std::lock_guard lock(mutex_);
   bool ok = true;
   if (!game_.file.empty()) ok &= LoadFile(game_, game_.file, error);
+  if (!global_.file.empty()) ok &= LoadFile(global_, global_.file, error);
   if (!user_.file.empty()) ok &= LoadFile(user_, user_.file, error);
   cache_.clear();
   warnings_.clear();
@@ -975,13 +1042,14 @@ std::shared_ptr<const Style> StyleManager::ResolveLocked(std::string_view set_id
   add_layer(game_, "game");
   const size_t user_start = patches.size() + 1;
   patches.push_back({nullptr, nullptr, "hook"});
+  add_layer(global_, "global");
   add_layer(user_, "user");
 
   std::string theme;
   size_t start = 0;
   if (!theme_override_.empty()) {
     theme = theme_override_;
-    start = user_start;  // A forced theme keeps only the user's tweaks.
+    start = user_start;  // A forced theme keeps only the player's tweaks.
   } else {
     for (size_t i = patches.size(); i-- > 0;) {
       if (!patches[i].j) continue;

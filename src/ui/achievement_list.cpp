@@ -187,25 +187,25 @@ void AchievementListWindow::DrawContents() {
         const ImVec2 p1(p0.x + isz, p0.y + isz);
         void* tex = nullptr;
         bool dim = false;
+        // Achievements without an icon show the fallback (the game's icon).
         if (icons_ && !hidden) {
           if (!unlocked && !a.locked_icon.empty()) tex = icons_->Get(a.locked_icon, a.set_id, set->base_dir);
           if (!tex) {
-            tex = icons_->Get(a.icon, a.set_id, set->base_dir);
+            tex = icons_->GetOrFallback(a.icon, a.set_id, set->base_dir);
             dim = !unlocked;
           }
-        } else if (icons_ && hidden && !a.locked_icon.empty()) {
-          tex = icons_->Get(a.locked_icon, a.set_id, set->base_dir);
+        } else if (icons_ && hidden) {
+          tex = icons_->GetOrFallback(a.locked_icon, a.set_id, set->base_dir);
         }
         ImDrawList* dl = ImGui::GetWindowDrawList();
         if (tex) {
           dl->AddImage(ToImTextureID(tex), p0, p1, ImVec2(0, 0), ImVec2(1, 1),
                        dim ? IM_COL32(110, 110, 110, 255) : IM_COL32_WHITE);
         } else {
+          // No icon and no fallback icon: the trophy, dimmed while locked.
           dl->AddRectFilled(p0, p1, ImGui::GetColorU32(unlocked ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg), 4.0f);
-          const char* glyph = hidden ? "?" : (unlocked ? "+" : "-");
-          const ImVec2 ext = ImGui::CalcTextSize(glyph);
-          dl->AddText(ImVec2(p0.x + (isz - ext.x) * 0.5f, p0.y + (isz - ext.y) * 0.5f),
-                      ImGui::GetColorU32(ImGuiCol_Text), glyph);
+          DrawTrophy(dl, ImVec2(p0.x + isz * 0.5f, p0.y + isz * 0.5f), isz * 0.5f,
+                     ImGui::GetColorU32(ImGuiCol_Text, unlocked ? 1.0f : 0.45f));
         }
         ImGui::Dummy(ImVec2(isz, isz));
         ImGui::SameLine();

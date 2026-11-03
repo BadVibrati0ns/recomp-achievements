@@ -169,6 +169,27 @@ void* IconCache::Get(std::string_view ref, std::string_view set_id, const std::f
   return it->second.texture;
 }
 
+void IconCache::SetFallbackIcon(std::string ref, std::filesystem::path base_dir) {
+  std::lock_guard lock(mutex_);
+  fallback_ref_ = std::move(ref);
+  fallback_base_dir_ = std::move(base_dir);
+}
+
+void* IconCache::GetOrFallback(std::string_view ref, std::string_view set_id,
+                               const std::filesystem::path& base_dir) {
+  if (!ref.empty()) {
+    if (void* texture = Get(ref, set_id, base_dir)) return texture;
+  }
+  std::string fallback;
+  std::filesystem::path fallback_base;
+  {
+    std::lock_guard lock(mutex_);
+    fallback = fallback_ref_;
+    fallback_base = fallback_base_dir_;
+  }
+  return fallback.empty() ? nullptr : Get(fallback, {}, fallback_base);
+}
+
 void IconCache::Clear() {
   std::map<std::string, Entry, std::less<>> entries;
   DestroyTexture destroy;

@@ -158,11 +158,28 @@ int main(int argc, char** argv) {
   std::vector<float> soundtrack;
   std::vector<uint8_t> frame(kWidth * kHeight * 3);
   float clock = 0.0f;
+  // One scene per built-in theme, then one where the player's global
+  // preferences override the theme the game asked for.
+  struct Scene {
+    std::string caption;
+    std::shared_ptr<const Style> style;
+  };
+  std::vector<Scene> scenes;
   for (const std::string& theme : BuiltinThemeNames()) {
+    scenes.push_back({"theme: " + theme, std::make_shared<Style>(BuiltinTheme(theme))});
+  }
+  StyleManager layered;
+  layered.SetGameStyle(nlohmann::json{{"theme", "classic"}});
+  layered.SetGlobalStyle(nlohmann::json::parse(R"({"theme": "ps3", "unlock": {"anchor": "top_right"}})"));
+  scenes.push_back({"game: classic / global preferences: ps3, top right", layered.Resolve(nullptr)});
+
+  for (const Scene& scene : scenes) {
+    const std::string& caption = scene.caption;
     NotificationCenter center;
     ImGuiRenderer renderer(center, &icons);
     renderer.SetFonts(regular, bold);
-    auto style = std::make_shared<Style>(BuiltinTheme(theme));
+    auto style = scene.style;
+    const bool ps3 = style->theme == "ps3";
 
     Notification unlock;
     unlock.kind = NotificationKind::kUnlock;
@@ -170,9 +187,9 @@ int main(int argc, char** argv) {
     unlock.name = "Flip Trick Encyclopedia";
     unlock.description = "Land every flip trick at least once.";
     unlock.points = 50;
-    unlock.tier = theme == "ps3" ? Tier::kGold : Tier::kNone;
+    unlock.tier = ps3 ? Tier::kGold : Tier::kNone;
     unlock.icon = "demo:1";
-    unlock.set_title = "Theme: " + theme;
+    unlock.set_title = caption;
     unlock.style = style;
     Notification progress = unlock;
     progress.kind = NotificationKind::kProgress;
@@ -181,6 +198,7 @@ int main(int argc, char** argv) {
     progress.item = "Crooked Grind";
     progress.current = 3;
     progress.total = 14;
+    progress.icon.clear();  // No icon and no fallback icon: the trophy is drawn.
 
     const int frames = static_cast<int>(kSecondsPerTheme * kFps);
     for (int f = 0; f < frames; ++f) {
@@ -197,7 +215,7 @@ int main(int argc, char** argv) {
       io.DeltaTime = 1.0f / kFps;
       ImGui::NewFrame();
       ImDrawList* fg = ImGui::GetForegroundDrawList();
-      fg->AddText(bold, 22, ImVec2(24, 20), IM_COL32(255, 255, 255, 230), ("theme: " + theme).c_str());
+      fg->AddText(bold, 22, ImVec2(24, 20), IM_COL32(255, 255, 255, 230), caption.c_str());
       renderer.Draw(true);
       ImGui::Render();
 

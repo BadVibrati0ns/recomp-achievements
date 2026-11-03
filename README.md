@@ -11,7 +11,9 @@ list of its own.
   - Unlocks the game makes itself are hooked: XAM on rexglue, sceNpTrophy calls on PS3.
 - **Copies public RetroAchievements lists:** names, descriptions, points, badges, and credit to the original authors. The recomp never connects to RetroAchievements, which doesn't support recomps. Each recomp adds its own unlock conditions, and can write them in RetroAchievements' condition syntax to be checked against guest memory.
 - **Custom achievements, JSON first:** a game or a mod writes its own list in a hand-writable JSON format, with built-in triggers for stats, events, checklists and counts, plus types the game defines.
-- **Popups:** unlock popups and progress popups (for example "Kickflip 3/14"), with sounds synthesized in the style of each platform. Original console sounds and artwork aren't included. Games and players can override any style or sound with JSON and WAV files.
+- **Popups:** unlock popups and progress popups (for example "Kickflip 3/14"), with sounds synthesized in the style of each platform. Original console sounds and artwork aren't included. Games and players can override any style or sound with JSON and WAV files. Players can set preferences once for every game, in `%APPDATA%\recomp-achievements` on Windows or `~/.config/recomp-achievements` elsewhere.
+- **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
+  in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
 
 ## Parts
@@ -66,6 +68,7 @@ achievements.LoadDirectory(user_dir / "mods");   // mod packs with their own lis
 
 ui::PopupUiOptions popup_options;
 popup_options.user_dir = user_dir;                       // achievements_style.json, sounds/*.wav
+popup_options.fallback_icon = "assets/icon.png";         // the game's desktop icon, for custom achievements
 popup_options.create_texture = UploadRgbaTexture;        // your renderer
 ui::PopupUi popups(achievements, popup_options);
 

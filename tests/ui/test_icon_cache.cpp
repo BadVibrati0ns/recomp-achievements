@@ -176,3 +176,28 @@ TEST(builtin_png_decoder) {
   Image bad;
   CHECK(!DecodeImage(std::vector<uint8_t>{'F', 'A', 'K', 'E'}, bad));
 }
+
+TEST(fallback_icon_for_achievements_without_one) {
+  IconCache cache;
+  FakeTextures tex;
+  tex.Install(cache);
+  cache.AddProvider("game", [](const IconRequest&, IconData& out) {
+    out.image = Solid(4, 4);
+    return IconResult::kOk;
+  });
+  cache.AddProvider("own", [](const IconRequest&, IconData& out) {
+    out.image = Solid(2, 2);
+    return IconResult::kOk;
+  });
+  CHECK(cache.GetOrFallback("") == nullptr);  // No fallback set yet.
+
+  cache.SetFallbackIcon("game:icon");
+  void* fallback = cache.GetOrFallback("");
+  CHECK(fallback != nullptr);
+  CHECK(cache.GetOrFallback("missing:1") == fallback);  // Unloadable icons fall back too.
+  void* own = cache.GetOrFallback("own:1");
+  CHECK(own != nullptr && own != fallback);  // An achievement's own icon wins.
+
+  cache.SetFallbackIcon("");
+  CHECK(cache.GetOrFallback("") == nullptr);
+}

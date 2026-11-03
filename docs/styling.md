@@ -22,9 +22,21 @@ For each achievement set the style is resolved from, lowest first:
 2. **Game style JSON**: shipped with the game (`StyleManager::LoadGameStyleFile`
    or `SetGameStyle`).
 3. **Game hook**: a C++ callback that edits the Style (`SetGameHook`).
-4. **User style JSON**: the player's file, by convention
-   `<user dir>/achievements_style.json` (`LoadUserStyleFile`). A missing file is
-   fine.
+4. **Global preferences**: the player's settings for every game that uses this
+   SDK, in `achievements_style.json` in the global folder (`LoadGlobalStyleFile`):
+
+   | System        | Folder |
+   |---------------|--------|
+   | Windows       | `%APPDATA%\recomp-achievements` |
+   | Linux, macOS  | `$XDG_CONFIG_HOME/recomp-achievements`, normally `~/.config/recomp-achievements` |
+
+   `RECOMP_ACHIEVEMENTS_CONFIG_DIR` moves it. Its `sounds/` folder holds
+   replacement WAVs for every game. `PopupUi` loads both and, on first run,
+   creates the folder with a starter file whose settings are all commented out
+   (`EnsureGlobalConfigDir`).
+5. **User style JSON**: the player's file for this one game, by convention
+   `<user dir>/achievements_style.json` (`LoadUserStyleFile`). It's the most
+   specific, so it wins over the global preferences. A missing file is fine.
 
 Each JSON layer is applied as: its root object, then `platforms.<platform>`,
 then `sets.<set id>`. Platform keys are `custom`, `xbox360`, `ps3`, `retro`.
@@ -79,7 +91,7 @@ Extra keys inside `progress`:
 | `padding`, `rounding`, `border` | number | Inner padding, corner radius, border thickness (0 = none). |
 | `icon_size`, `icon_rounding` | number | Icon edge and corner radius. |
 | `icon_shape` | string | `square` or `circle`. |
-| `badge` | string | Text in the fallback badge drawn when there is no icon; `""` draws a small cup. |
+| `badge` | string | Text drawn in place of a missing icon, when there is no fallback icon either. `""` (the default) draws a trophy. |
 | `font_scale` | number | Multiplier on all four font sizes. |
 | `font_sizes` | object | `title`, `name`, `points`, `description`. |
 | `description_lines` | int | Description wraps to this many lines, the last one ellipsised. |
@@ -268,3 +280,11 @@ renderer.SetCustomDraw([&](ImDrawList* dl, const ActivePopup& p, const PopupLayo
 Games that can show only one popup at a time call `NotificationCenter::SetSingleSlot(true)`. Unlock and
 progress popups then share a single slot, and a waiting unlock goes before waiting progress. Without it,
 each kind follows its own `max_visible`.
+
+## Achievements without an icon
+
+Most custom achievements have no icon. They show the game's fallback icon, usually its desktop icon, which
+the game sets with `PopupUiOptions::fallback_icon` or `IconCache::SetFallbackIcon`. The popups and the
+achievement list both use it. If the game sets no fallback icon, a trophy is drawn instead (or the `badge`
+text, if the style sets one). Games that draw their own popups get the same behaviour from
+`IconCache::GetOrFallback`, and can draw the trophy with `DrawTrophy`.

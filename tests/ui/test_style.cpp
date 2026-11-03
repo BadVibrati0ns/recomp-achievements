@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -314,5 +315,65 @@ TEST(style_doc_examples_are_valid) {
     }
   }
   CHECK(checked >= 5);
+}
+#endif
+
+TEST(style_manager_global_preferences) {
+  StyleManager m;
+  m.SetGameStyle(json::parse(R"({"theme": "classic", "unlock": {"width": 500}, "sound": {"volume": 0.9}})"));
+  m.SetGameHook([](Style& s, const AchievementSet*) { s.unlock.padding = 3; });
+  // The player's global choice beats the game's style and hook...
+  m.SetGlobalStyle(json::parse(R"({"theme": "xbox360", "sound": {"volume": 0.2}, "unlock": {"padding": 7}})"));
+  auto s = m.Resolve(nullptr);
+  CHECK(s->theme == "xbox360");
+  CHECK_NEAR(s->sound.volume, 0.2, 1e-6);
+  CHECK_NEAR(s->unlock.padding, 7, 1e-6);
+  CHECK_NEAR(s->unlock.width, BuiltinTheme("xbox360").unlock.width, 1e-6);  // Game layer skipped by the theme.
+
+  // ...and this game's own user style beats the global one.
+  m.SetUserStyle(json::parse(R"({"theme": "retro", "sound": {"volume": 0.5}})"));
+  s = m.Resolve(nullptr);
+  CHECK(s->theme == "retro");
+  CHECK_NEAR(s->sound.volume, 0.5, 1e-6);
+
+  // Without a theme of its own the global layer only tweaks the game's choice.
+  StyleManager t;
+  t.SetGameStyle(json::parse(R"({"theme": "classic"})"));
+  t.SetGlobalStyle(json::parse(R"({"sound": {"enabled": false}})"));
+  auto u = t.Resolve(nullptr);
+  CHECK(u->theme == "classic");
+  CHECK(!u->sound.enabled);
+}
+
+#if !defined(_WIN32)
+TEST(global_config_dir_and_template) {
+  const auto dir = std::filesystem::temp_directory_path() / "recomp_ach_ui_tests" / "global";
+  std::filesystem::remove_all(dir);
+  setenv("RECOMP_ACHIEVEMENTS_CONFIG_DIR", dir.c_str(), 1);
+  CHECK(GlobalConfigDir() == dir);
+  CHECK(EnsureGlobalConfigDir() == dir);
+  CHECK(std::filesystem::is_directory(dir / "sounds"));
+  // The starter file parses and changes nothing.
+  StyleManager m;
+  m.SetGameStyle(json::parse(R"({"theme": "ps3"})"));
+  std::string error;
+  CHECK(m.LoadGlobalStyleFile(dir / "achievements_style.json", &error));
+  CHECK(m.Resolve(nullptr)->theme == "ps3");
+  CHECK(m.warnings().empty());
+  // An existing file is left alone.
+  std::ofstream(dir / "achievements_style.json") << R"({"theme": "retro"})";
+  EnsureGlobalConfigDir();
+  CHECK(m.LoadGlobalStyleFile(dir / "achievements_style.json", &error));
+  CHECK(m.Resolve(nullptr)->theme == "retro");
+
+  unsetenv("RECOMP_ACHIEVEMENTS_CONFIG_DIR");
+  setenv("XDG_CONFIG_HOME", "/tmp/xdg-test", 1);
+  CHECK(GlobalConfigDir() == std::filesystem::path("/tmp/xdg-test/recomp-achievements"));
+  unsetenv("XDG_CONFIG_HOME");
+  const char* home = std::getenv("HOME");
+  const std::string saved_home = home ? home : "";
+  setenv("HOME", "/home/someone", 1);
+  CHECK(GlobalConfigDir() == std::filesystem::path("/home/someone/.config/recomp-achievements"));
+  if (home) setenv("HOME", saved_home.c_str(), 1);
 }
 #endif

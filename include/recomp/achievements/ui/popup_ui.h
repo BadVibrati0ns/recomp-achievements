@@ -25,6 +25,14 @@ struct PopupUiOptions {
   // Extra folders with replacement WAVs (see docs/styling.md); user_dir/sounds
   // is searched first, then these in reverse order.
   std::vector<std::filesystem::path> sound_dirs;
+  // The player's preferences for every game (GlobalConfigDir()): its
+  // achievements_style.json and sounds/ apply over the game's, under user_dir's.
+  bool global_preferences = true;
+  // Create that folder with a commented starter file if it's missing.
+  bool create_global_preferences = true;
+  // Icon for achievements without one (most custom ones): usually the game's
+  // desktop icon. A file path or any icon ref.
+  std::string fallback_icon;
   IconCache::CreateTexture create_texture;
   IconCache::DestroyTexture destroy_texture;
   bool sounds = true;

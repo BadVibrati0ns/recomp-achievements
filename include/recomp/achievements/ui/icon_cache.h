@@ -76,6 +76,14 @@ class IconCache {
   // Clear(); pending results are retried after retry_seconds.
   void* Get(std::string_view ref, std::string_view set_id = {},
             const std::filesystem::path& base_dir = {});
+  // The icon for achievements that have none (most custom ones), or whose
+  // icon can't be loaded: usually the game's desktop icon. Any icon ref; a
+  // relative file path resolves from base_dir. Empty clears it.
+  void SetFallbackIcon(std::string ref, std::filesystem::path base_dir = {});
+  // Get(ref), or the fallback icon when ref is empty or doesn't load. Null
+  // when neither is available. The popups and the list window use this.
+  void* GetOrFallback(std::string_view ref, std::string_view set_id = {},
+                      const std::filesystem::path& base_dir = {});
   // Loads the image without creating a texture (for tests / other renderers).
   IconResult Load(std::string_view ref, std::string_view set_id,
                   const std::filesystem::path& base_dir, Image& out);
@@ -99,6 +107,8 @@ class IconCache {
   std::map<std::string, Provider, std::less<>> providers_;
   std::map<std::string, Entry, std::less<>> entries_;
   double retry_seconds_ = 2.0;
+  std::string fallback_ref_;
+  std::filesystem::path fallback_base_dir_;
 };
 
 // Splits "scheme:body". Windows drive letters ("C:/x.png") and refs without a

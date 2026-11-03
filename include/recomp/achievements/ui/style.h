@@ -219,6 +219,18 @@ std::string FormatText(std::string_view fmt, const std::map<std::string, std::st
 // "sets"[<set id>]. The theme comes from the highest of those patches that
 // names one ("auto" = by platform), and patches below that one are skipped
 // because they were tuning a different theme. Thread-safe.
+// The player's preferences for every game using this SDK:
+//   Windows        %APPDATA%\recomp-achievements
+//   Linux, macOS   $XDG_CONFIG_HOME/recomp-achievements (default ~/.config/...)
+// RECOMP_ACHIEVEMENTS_CONFIG_DIR overrides it. Holds achievements_style.json
+// (the same format as a game's style file) and sounds/*.wav. Empty when no
+// home folder can be found.
+std::filesystem::path GlobalConfigDir();
+// Creates GlobalConfigDir() with a commented achievements_style.json that
+// changes nothing and an empty sounds/ folder, so players can find them.
+// Leaves existing files alone. Returns the folder, or empty on failure.
+std::filesystem::path EnsureGlobalConfigDir();
+
 class StyleManager {
  public:
   using Hook = std::function<void(Style&, const AchievementSet* set)>;
@@ -229,6 +241,10 @@ class StyleManager {
   void SetGameStyle(nlohmann::json style, std::filesystem::path base_dir = {});
   // A missing file is not an error (returns true, no layer). Parse errors return false.
   bool LoadGameStyleFile(const std::filesystem::path& path, std::string* error = nullptr);
+  // The player's preferences for every game (see GlobalConfigDir()). They
+  // override the game's style and hook; the per-game user style overrides them.
+  void SetGlobalStyle(nlohmann::json style, std::filesystem::path base_dir = {});
+  bool LoadGlobalStyleFile(const std::filesystem::path& path, std::string* error = nullptr);
   void SetUserStyle(nlohmann::json style, std::filesystem::path base_dir = {});
   bool LoadUserStyleFile(const std::filesystem::path& path, std::string* error = nullptr);
   // Re-reads the files given to Load*StyleFile (e.g. from a settings menu).
@@ -258,7 +274,7 @@ class StyleManager {
   bool LoadFile(Layer& layer, const std::filesystem::path& path, std::string* error);
 
   mutable std::mutex mutex_;
-  Layer game_, user_;
+  Layer game_, global_, user_;
   Hook hook_;
   std::string theme_override_;
   uint64_t generation_ = 1;

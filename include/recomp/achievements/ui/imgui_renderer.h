@@ -27,6 +27,9 @@ struct PopupLayout {
   ImFont* font_bold = nullptr;
 };
 
+// The trophy drawn in place of a missing icon, centred on c with radius r.
+void DrawTrophy(ImDrawList* draw_list, ImVec2 c, float r, ImU32 col);
+
 inline ImTextureID ToImTextureID(void* texture) {
   return (ImTextureID)(uintptr_t)texture;
 }
