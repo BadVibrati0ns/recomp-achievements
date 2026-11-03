@@ -114,6 +114,11 @@ python3 -m unittest discover -s tools/tests
 The rcheevos fetch needs network access the first time; turn it off with
 `-DRECOMP_ACH_MEMORY=OFF`.
 
+## License
+
+[0BSD](LICENSE) (Zero-Clause BSD): use it for anything, no attribution needed. The bundled
+nlohmann/json and the fetched rcheevos keep their own MIT licences.
+
 ## Credits
 
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT) is bundled in `third_party/`.
