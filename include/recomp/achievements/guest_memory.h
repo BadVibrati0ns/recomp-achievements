@@ -62,6 +62,10 @@ class GuestMemory {
   // plus the 16 KB scratchpad (EE 0x70000000) at RA's 0x02000000 if given.
   static GuestMemory PS2Recomp(const uint8_t* ee_ram, uint32_t size = 32u * 1024 * 1024,
                                const uint8_t* scratchpad = nullptr);
+  // PSP recomps (e.g. psprecomp's psp_mem.ram): `ram` holds guest memory
+  // from 0x08000000, little-endian. RA's PSP map puts address 0 at
+  // 0x08000000, so user RAM (0x08800000) is RA 0x00800000.
+  static GuestMemory Psp(const uint8_t* ram, uint32_t size = 32u * 1024 * 1024);
   // rexglue / Xbox 360: big-endian guest memory where guest virtual address A
   // lives at membase + A. RA has no 360 map; addresses are guest virtual
   // addresses. Only expose ranges that are committed: reading an unmapped

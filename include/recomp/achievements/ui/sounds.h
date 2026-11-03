@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,10 +38,15 @@ std::vector<std::string> BuiltinSoundNames();
 // Empty Pcm for unknown names. Deterministic; peaks stay below 0.9.
 Pcm SynthesizeBuiltin(std::string_view name);
 
+// Built-in WAV decoding (PCM 8/16/24/32-bit and float, any channel count and
+// rate), converted to kSoundSampleRate stereo. No SDL needed.
+bool DecodeWav(std::span<const uint8_t> bytes, Pcm& out);
+bool LoadWavFile(const std::filesystem::path& path, Pcm& out);
+
 class SoundBank {
  public:
-  // Decodes a WAV file to our format. SoundPlayer installs SDL_LoadWAV; with
-  // no loader only built-ins are available.
+  // Decodes a WAV file to our format. Defaults to LoadWavFile; SoundPlayer
+  // installs SDL_LoadWAV instead. A null loader leaves only built-ins.
   using WavLoader = std::function<bool(const std::filesystem::path& path, Pcm& out)>;
 
   void SetWavLoader(WavLoader loader);
@@ -64,7 +70,7 @@ class SoundBank {
   std::shared_ptr<const Pcm> FindOverride(std::string_view stem);
 
   mutable std::mutex mutex_;
-  WavLoader loader_;
+  WavLoader loader_ = LoadWavFile;
   std::vector<std::filesystem::path> override_dirs_;
   // Missing files are cached as null so they aren't stat'ed every popup.
   std::map<std::string, std::shared_ptr<const Pcm>, std::less<>> cache_;

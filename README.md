@@ -20,9 +20,10 @@ list of its own.
 |---|---|---|
 | `recomp::achievements` | Registry, JSON sets, triggers, saves | nothing (nlohmann/json is bundled) |
 | `recomp::achievements_ui` | Popups, list window, styles, sounds, icons | Dear ImGui and SDL3 targets (each optional) |
+| `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding | nothing |
 | `recomp::achievements_xbox` | XDBF / SPA reader, title update search | nothing |
 | `recomp::achievements_trophy` | `TROPHY.TRP` / `TROPCONF.SFM` reader, sceNpTrophy backend | nothing |
-| `recomp::achievements_memory` | Memory triggers in RetroAchievements' condition syntax | rcheevos v11.6.0 (fetched; evaluation code only) |
+| `recomp::achievements_memory` | Memory triggers in RetroAchievements' condition syntax | nothing (a subset of rcheevos v11.6.0 is bundled) |
 | `recomp::achievements_rexglue` | Binding for rexglue (Xbox 360) recomps | rexglue with `patches/rexglue-achievements.patch` |
 
 ```cmake
@@ -41,13 +42,13 @@ path. Compile these sources and set these defines:
 | Part | Sources | Defines |
 |---|---|---|
 | core | `src/system.cpp`, `src/json_format.cpp` | none |
-| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp` | none |
+| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp` | none |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
 | UI, ImGui | `src/ui/imgui_renderer.cpp`, `achievement_list.cpp`, `popup_ui.cpp` | none (needs `imgui.h` on the include path) |
 | Xbox 360 | `src/sources/xdbf.cpp`, `xam.cpp` | none |
 | PS3 | `src/sources/trophy.cpp`, `trophy_context.cpp`, `mini_xml.cpp` | none |
 | rexglue | `src/rexglue/rexglue_binding.cpp` | `RECOMP_ACH_REXGLUE_KERNEL_HOOKS=1` with the patch, `0` for stock rexglue |
-| memory | `src/memory/*.cpp`, plus rcheevos' `alloc`, `condition`, `condset`, `memref`, `operand`, `trigger`, `value`, `rc_compat` and `rc_util` | `RC_DISABLE_LUA` |
+| memory | `src/memory/*.cpp`, plus the bundled `third_party/rcheevos/src` files (C99, with `third_party/rcheevos/include` and `third_party/rcheevos/src` on the include path) | `RC_DISABLE_LUA` |
 
 CMake also defines `RECOMP_ACH_HAS_IMGUI` for consumers, but no SDK source reads it.
 
@@ -111,16 +112,22 @@ ctest --test-dir build
 python3 -m unittest discover -s tools/tests
 ```
 
-The rcheevos fetch needs network access the first time; turn it off with
-`-DRECOMP_ACH_MEMORY=OFF`.
+Everything builds offline.
+
+Games that draw their own popups (no Dear ImGui) link `recomp::achievements_ui_base`, feed a
+`NotificationCenter` and draw its `Active()` popups. WAV overrides and PNG icons decode without SDL, and
+`SetSingleSlot(true)` keeps unlock and progress popups to one on screen at a time.
 
 ## License
 
-[0BSD](LICENSE) (Zero-Clause BSD): use it for anything, no attribution needed. The bundled
-nlohmann/json and the fetched rcheevos keep their own MIT licences.
+[0BSD](LICENSE) (Zero-Clause BSD): use it for anything, no attribution needed. Bundled code keeps its
+own licence: nlohmann/json (MIT), the rcheevos subset (MIT, `third_party/rcheevos/LICENSE`) and
+stb_image (MIT or public domain).
 
 ## Credits
 
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT) is bundled in `third_party/`.
-- [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT) evaluates memory conditions.
+- [rcheevos](https://github.com/RetroAchievements/rcheevos) (MIT) evaluates memory conditions; its
+  condition evaluator is bundled in `third_party/rcheevos`, without any of its network code.
+- [stb_image](https://github.com/nothings/stb) (MIT or public domain) decodes icons without SDL.
 - Imported RetroAchievements lists credit their authors in each set file. The text and badge art belong to those authors and to RetroAchievements.

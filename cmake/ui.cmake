@@ -16,7 +16,8 @@ add_library(recomp_achievements_ui_base STATIC
     ${_ach_ui_src}/notification_center.cpp
     ${_ach_ui_src}/notification_attach.cpp
     ${_ach_ui_src}/sounds.cpp
-    ${_ach_ui_src}/icon_cache.cpp)
+    ${_ach_ui_src}/icon_cache.cpp
+    ${_ach_ui_src}/builtin_decoders.cpp)
 add_library(recomp::achievements_ui_base ALIAS recomp_achievements_ui_base)
 target_link_libraries(recomp_achievements_ui_base PUBLIC recomp_achievements)
 

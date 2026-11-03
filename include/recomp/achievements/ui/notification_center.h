@@ -116,6 +116,12 @@ class NotificationCenter {
   std::vector<ActivePopup> Active() const;
   bool Busy() const;  // Anything visible or waiting: keep repainting.
 
+  // One popup on screen at a time, for games with a single popup slot:
+  // unlocks and progress share it, and a waiting unlock goes before waiting
+  // progress. Each kind's max_visible still applies when off (the default).
+  void SetSingleSlot(bool single);
+  bool single_slot() const;
+
   // Keeps popups waiting (e.g. while a loading screen or the pause menu is up).
   void SetPaused(bool paused);
   bool paused() const;
@@ -136,7 +142,9 @@ class NotificationCenter {
   };
   std::shared_ptr<const Style> ResolveStyle(std::string_view set_id, Platform platform,
                                             const AchievementSet* set) const;
-  void UpdateQueue(Queue& q, float dt, std::vector<SoundRequest>& sounds);
+  void Expire(Queue& q, float dt);
+  void Admit(Queue& q, size_t limit, std::vector<SoundRequest>& sounds);
+  static void AnimateQueue(Queue& q, float dt);
   static void Animate(ActivePopup& p, float dt);
 
   mutable std::mutex mutex_;
@@ -144,6 +152,7 @@ class NotificationCenter {
   SoundHandler sound_handler_;
   Queue unlocks_, progress_;
   bool paused_ = false;
+  bool single_slot_ = false;
   bool unlock_enabled_ = true, progress_enabled_ = true;
   uint64_t next_serial_ = 1;
   uint64_t dropped_ = 0;

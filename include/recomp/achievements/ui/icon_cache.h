@@ -45,6 +45,10 @@ enum class IconResult {
   kMissing,  // Never available; cached as missing.
 };
 
+// Built-in image decoding (PNG, JPEG, BMP, TGA via stb_image) to RGBA. No SDL
+// needed; IconCache uses it unless SetDecoder replaces it.
+bool DecodeImage(std::span<const uint8_t> bytes, Image& out);
+
 class IconCache {
  public:
   // Returns the renderer's texture handle (an ImTextureID cast to void* for
@@ -91,7 +95,7 @@ class IconCache {
   mutable std::mutex mutex_;
   CreateTexture create_;
   DestroyTexture destroy_;
-  Decoder decoder_;
+  Decoder decoder_ = DecodeImage;
   std::map<std::string, Provider, std::less<>> providers_;
   std::map<std::string, Entry, std::less<>> entries_;
   double retry_seconds_ = 2.0;

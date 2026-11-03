@@ -5,14 +5,10 @@ if(NOT RECOMP_ACH_MEMORY)
   return()
 endif()
 
-include(FetchContent)
-FetchContent_Declare(recomp_ach_rcheevos
-    GIT_REPOSITORY https://github.com/RetroAchievements/rcheevos.git
-    GIT_TAG v11.6.0
-    GIT_SHALLOW TRUE)
-# rcheevos has no CMakeLists.txt, so this only downloads it.
-FetchContent_MakeAvailable(recomp_ach_rcheevos)
-set(RECOMP_ACH_RCHEEVOS_DIR ${recomp_ach_rcheevos_SOURCE_DIR})
+# A subset of rcheevos v11.6.0 is bundled in third_party/rcheevos, so building
+# needs no network. Point RECOMP_ACH_RCHEEVOS_DIR at another checkout to use it.
+set(RECOMP_ACH_RCHEEVOS_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/rcheevos"
+    CACHE PATH "rcheevos source tree (defaults to the bundled subset)")
 
 add_library(recomp_achievements_rcheevos STATIC
     ${RECOMP_ACH_RCHEEVOS_DIR}/src/rcheevos/alloc.c
@@ -59,7 +55,7 @@ if(RECOMP_ACH_BUILD_TESTS)
       RECOMP_ACH_MEMORY_TEST_DATA="${CMAKE_CURRENT_LIST_DIR}/../tests/memory/data")
   # One CTest entry per case, so a failure is reported by name.
   set(RECOMP_ACH_MEMORY_TEST_CASES
-      guest_memory_regions guest_memory_n64_swizzle guest_memory_ps2 guest_memory_x360
+      guest_memory_regions guest_memory_n64_swizzle guest_memory_ps2 guest_memory_psp guest_memory_x360
       guest_memory_peek_callback parse_error simple_compare waiting_state hit_counts
       reset_if pause_if measured measured_percent delta_compare n64_condition x360_condition
       reset_rearm primed

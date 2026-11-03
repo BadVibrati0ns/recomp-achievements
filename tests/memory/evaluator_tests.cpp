@@ -109,6 +109,19 @@ MEM_TEST(guest_memory_ps2) {
   CHECK(!with_spr.IsMapped(0x02004000));
 }
 
+MEM_TEST(guest_memory_psp) {
+  // psprecomp's psp_mem.ram starts at guest 0x08000000; user RAM is 0x08800000.
+  std::vector<uint8_t> ram(32u * 1024 * 1024);
+  const uint32_t value = 0x12345678u;
+  std::memcpy(&ram[0x00800010], &value, 4);
+  GuestMemory mem = GuestMemory::Psp(ram.data());
+  CHECK(mem.ReadU32(0x00800010) == 0x12345678u);
+  CHECK(mem.ReadU8(0x00800010) == 0x78);
+  CHECK(mem.IsMapped(0x01FFFFFF));
+  CHECK(!mem.IsMapped(0x02000000));
+  CHECK(mem.regions().front().endian == Endian::kLittle);
+}
+
 MEM_TEST(guest_memory_x360) {
   std::vector<uint8_t> membase(0x2000);
   membase[0x1000] = 0x00;

@@ -1,6 +1,7 @@
 #include "recomp/achievements/ui/notification_center.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 
 namespace recomp::achievements::ui {
@@ -270,14 +271,16 @@ void NotificationCenter::Animate(ActivePopup& p, float dt) {
   if (std::abs(p.stack_pos - target) < 0.001f) p.stack_pos = target;
 }
 
-void NotificationCenter::UpdateQueue(Queue& q, float dt, std::vector<SoundRequest>& sounds) {
+void NotificationCenter::Expire(Queue& q, float dt) {
   for (auto& a : q.active) a.elapsed += dt;
   q.active.erase(std::remove_if(q.active.begin(), q.active.end(),
                                 [](const ActivePopup& a) { return a.elapsed >= a.n.popup().timing.total(); }),
                  q.active.end());
+}
 
+void NotificationCenter::Admit(Queue& q, size_t limit, std::vector<SoundRequest>& sounds) {
   while (!paused_ && !q.waiting.empty() &&
-         q.active.size() < static_cast<size_t>(std::max(1, q.waiting.front().popup().max_visible))) {
+         q.active.size() < std::min(limit, static_cast<size_t>(std::max(1, q.waiting.front().popup().max_visible)))) {
     ActivePopup a;
     a.n = std::move(q.waiting.front());
     q.waiting.pop_front();
@@ -291,7 +294,9 @@ void NotificationCenter::UpdateQueue(Queue& q, float dt, std::vector<SoundReques
     }
     q.active.push_back(std::move(a));
   }
+}
 
+void NotificationCenter::AnimateQueue(Queue& q, float dt) {
   for (size_t i = 0; i < q.active.size(); ++i) {
     q.active[i].slot = static_cast<int>(i);
     Animate(q.active[i], dt);
@@ -305,8 +310,18 @@ void NotificationCenter::Update(float dt) {
   SoundHandler handler;
   {
     std::lock_guard lock(mutex_);
-    UpdateQueue(unlocks_, dt, sounds);
-    UpdateQueue(progress_, dt, sounds);
+    Expire(unlocks_, dt);
+    Expire(progress_, dt);
+    if (single_slot_) {
+      // One popup on screen at a time; a waiting unlock goes before progress.
+      if (progress_.active.empty()) Admit(unlocks_, 1, sounds);
+      if (unlocks_.active.empty() && unlocks_.waiting.empty()) Admit(progress_, 1, sounds);
+    } else {
+      Admit(unlocks_, SIZE_MAX, sounds);
+      Admit(progress_, SIZE_MAX, sounds);
+    }
+    AnimateQueue(unlocks_, dt);
+    AnimateQueue(progress_, dt);
     for (auto& n : resound_) {
       const Style& s = *n.style;
       if (s.sound.enabled && s.sound.volume > 0.0f)
@@ -334,6 +349,16 @@ bool NotificationCenter::Busy() const {
   std::lock_guard lock(mutex_);
   return !unlocks_.active.empty() || !unlocks_.waiting.empty() || !progress_.active.empty() ||
          !progress_.waiting.empty() || !resound_.empty();
+}
+
+void NotificationCenter::SetSingleSlot(bool single) {
+  std::lock_guard lock(mutex_);
+  single_slot_ = single;
+}
+
+bool NotificationCenter::single_slot() const {
+  std::lock_guard lock(mutex_);
+  return single_slot_;
 }
 
 void NotificationCenter::SetPaused(bool paused) {

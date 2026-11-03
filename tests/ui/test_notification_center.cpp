@@ -476,3 +476,40 @@ TEST(center_attached_to_system) {
   c.Update(0.0f);
   CHECK(c.Active().empty());  // Detached: nothing arrives.
 }
+
+TEST(center_single_slot_shares_one_popup) {
+  NotificationCenter c;
+  c.SetSingleSlot(true);
+  CHECK(c.single_slot());
+  auto style = TestStyle(/*max_visible=*/3);
+  c.Push(Step("p", 1, 4, style));
+  c.Update(0.0f);
+  CHECK_EQ(c.Active().size(), 1u);  // Progress takes the free slot.
+  CHECK(c.Active()[0].n.kind == NotificationKind::kProgress);
+
+  // An unlock waits for the progress popup instead of showing beside it...
+  c.Push(Unlock("a", style));
+  c.Push(Unlock("b", style));
+  c.Push(Step("q", 2, 4, style));
+  c.Update(0.25f);
+  CHECK_EQ(c.Active().size(), 1u);
+  CHECK(c.Active()[0].n.key == "p");
+  // ...then both unlocks run one at a time, ahead of the waiting progress.
+  for (int i = 0; i < 4; ++i) c.Update(0.25f);  // Progress (1.0 s) is done.
+  CHECK_EQ(c.Active().size(), 1u);
+  CHECK(c.Active()[0].n.key == "a");
+  for (int i = 0; i < 8; ++i) c.Update(0.25f);
+  CHECK(c.Active()[0].n.key == "b");
+  for (int i = 0; i < 8; ++i) c.Update(0.25f);
+  CHECK_EQ(c.Active().size(), 1u);
+  CHECK(c.Active()[0].n.key == "q");
+  for (int i = 0; i < 4; ++i) c.Update(0.25f);
+  CHECK(c.Active().empty());
+  CHECK(!c.Busy());
+
+  // Off again: the style's max_visible applies.
+  c.SetSingleSlot(false);
+  for (const char* k : {"x", "y"}) c.Push(Unlock(k, style));
+  c.Update(0.0f);
+  CHECK_EQ(c.Active().size(), 2u);
+}

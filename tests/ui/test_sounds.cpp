@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -159,4 +160,73 @@ TEST(bank_failed_loader_falls_back_silent) {
   auto r = bank.Get("retro");
   CHECK(r != nullptr);
   CHECK(r->samples == SynthesizeBuiltin("retro").samples);
+}
+
+namespace {
+
+std::vector<uint8_t> MakeWav(uint16_t format, uint16_t channels, uint32_t rate, uint16_t bits,
+                             const std::vector<uint8_t>& data, bool extensible = false) {
+  std::vector<uint8_t> out;
+  auto u16 = [&](uint16_t v) { out.push_back(uint8_t(v)); out.push_back(uint8_t(v >> 8)); };
+  auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(uint8_t(v >> (8 * i))); };
+  const uint32_t fmt_size = extensible ? 40 : 16;
+  out.insert(out.end(), {'R', 'I', 'F', 'F'});
+  u32(4 + 8 + fmt_size + 8 + uint32_t(data.size()));
+  out.insert(out.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+  u32(fmt_size);
+  u16(extensible ? 0xFFFE : format);
+  u16(channels);
+  u32(rate);
+  u32(rate * channels * bits / 8);
+  u16(uint16_t(channels * bits / 8));
+  u16(bits);
+  if (extensible) {
+    u16(22); u16(bits); u32(0);
+    u16(format);
+    for (int i = 0; i < 14; ++i) out.push_back(0);
+  }
+  out.insert(out.end(), {'d', 'a', 't', 'a'});
+  u32(uint32_t(data.size()));
+  out.insert(out.end(), data.begin(), data.end());
+  return out;
+}
+
+}  // namespace
+
+TEST(builtin_wav_decoder_converts_to_stereo_48k) {
+  // 16-bit mono at 24 kHz: two frames, full scale and half scale.
+  const std::vector<uint8_t> data = {0xFF, 0x7F, 0x00, 0x40};
+  Pcm pcm;
+  CHECK(DecodeWav(MakeWav(1, 1, 24000, 16, data), pcm));
+  CHECK_EQ(pcm.frames(), 3u);  // 2 frames at half the rate -> 3 output frames.
+  CHECK(std::fabs(pcm.samples[0] - 32767 / 32768.0f) < 1e-4f);
+  CHECK(pcm.samples[0] == pcm.samples[1]);  // Mono on both sides.
+  CHECK(std::fabs(pcm.samples[4] - 0.5f) < 1e-4f);
+
+  // Float stereo at 48 kHz, wrapped in WAVE_FORMAT_EXTENSIBLE.
+  std::vector<uint8_t> f(8);
+  const float l = -0.25f, r = 0.75f;
+  std::memcpy(f.data(), &l, 4);
+  std::memcpy(f.data() + 4, &r, 4);
+  Pcm fpcm;
+  CHECK(DecodeWav(MakeWav(3, 2, 48000, 32, f, true), fpcm));
+  CHECK_EQ(fpcm.frames(), 1u);
+  CHECK(fpcm.samples[0] == l && fpcm.samples[1] == r);
+
+  Pcm bad;
+  CHECK(!DecodeWav(std::vector<uint8_t>{'R', 'I', 'F', 'F'}, bad));
+  CHECK(!DecodeWav(MakeWav(2, 1, 8000, 4, {0, 0}), bad));  // ADPCM isn't supported.
+}
+
+TEST(sound_bank_loads_wav_overrides_without_sdl) {
+  const auto dir = std::filesystem::temp_directory_path() / "recomp_ach_ui_tests" / "wav";
+  std::filesystem::create_directories(dir);
+  const auto wav = MakeWav(1, 1, 48000, 16, {0x00, 0x40, 0x00, 0x40});
+  std::ofstream(dir / "unlock.wav", std::ios::binary).write(reinterpret_cast<const char*>(wav.data()), wav.size());
+  SoundBank bank;
+  CHECK(bank.has_wav_loader());
+  bank.AddOverrideDir(dir);
+  auto pcm = bank.ForEvent(NotificationKind::kUnlock, Tier::kNone, "builtin:xbox360");
+  CHECK(pcm != nullptr);
+  if (pcm) CHECK_EQ(pcm->frames(), 2u);
 }

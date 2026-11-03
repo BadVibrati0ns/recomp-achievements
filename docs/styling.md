@@ -262,3 +262,9 @@ renderer.SetCustomDraw([&](ImDrawList* dl, const ActivePopup& p, const PopupLayo
   return true;
 });
 ```
+
+## One popup slot
+
+Games that can show only one popup at a time call `NotificationCenter::SetSingleSlot(true)`. Unlock and
+progress popups then share a single slot, and a waiting unlock goes before waiting progress. Without it,
+each kind follows its own `max_visible`.

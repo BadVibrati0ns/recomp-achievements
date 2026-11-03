@@ -32,6 +32,12 @@ GuestMemory GuestMemory::PS2Recomp(const uint8_t* ee_ram, uint32_t size,
   return memory;
 }
 
+GuestMemory GuestMemory::Psp(const uint8_t* ram, uint32_t size) {
+  GuestMemory memory;
+  memory.AddRegion(0, size, ram, Endian::kLittle);
+  return memory;
+}
+
 GuestMemory GuestMemory::Xbox360(const uint8_t* membase, uint32_t start, uint64_t size) {
   GuestMemory memory;
   memory.AddRegion(start, size, membase ? membase + start : nullptr, Endian::kBig);

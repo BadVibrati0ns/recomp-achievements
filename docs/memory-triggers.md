@@ -7,8 +7,8 @@ are evaluated by [rcheevos](https://github.com/RetroAchievements/rcheevos)
 built: no `rc_client`, no web API, no hashing. Nothing in the SDK connects to
 RetroAchievements.
 
-Build option: `RECOMP_ACH_MEMORY` (on by default; fetches rcheevos with
-FetchContent). Link `recomp::achievements_memory`.
+Build option: `RECOMP_ACH_MEMORY` (on by default; builds the rcheevos subset bundled in
+`third_party/rcheevos`, so no network is needed). Link `recomp::achievements_memory`.
 
 ## In a set file
 
@@ -144,6 +144,7 @@ transform), or a peek callback with RetroAchievements' semantics (byte at
 |---|---|---|
 | `GuestMemory::N64Recomp(rdram, size = 8 MB)` | `0x000000`-`0x7FFFFF` = RDRAM (physical; KSEG0 `0x80000000` is RA `0x0`) | N64Recomp's `rdram`: big-endian words stored as native 32-bit values, so guest byte `a` is `rdram[a ^ 3]` |
 | `GuestMemory::PS2Recomp(ee_ram, size = 32 MB, scratchpad = nullptr)` | `0x00000000`-`0x01FFFFFF` = EE RAM, `0x02000000`-`0x02003FFF` = scratchpad (EE `0x70000000`) | little-endian, linear |
+| `GuestMemory::Psp(ram, size = 32 MB)` | `0x00000000`-`0x01FFFFFF` = PSP `0x08000000`-`0x09FFFFFF` (user RAM from `0x00800000`) | little-endian, linear |
 | `GuestMemory::Xbox360(membase, start, size)` | guest virtual addresses (RA has no Xbox 360 map) | rexglue/Xenia-style: guest address `A` at `membase + A`, big-endian |
 
 N64 and Xbox 360 values are big-endian, so their conditions use `0xI`, `0xJ`,
