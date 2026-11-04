@@ -482,3 +482,86 @@ TEST(overlay_follows_set_changes) {
   CHECK(r.V().keys.empty());
   CHECK(Any(r.overlay->image()));  // "No achievements yet."
 }
+
+TEST(overlay_game_input_holds_chord_buttons) {
+  Rig r;
+  // Start alone: held back during the grace period, then reaches the game.
+  OverlayInput start;
+  start.pad_start = true;
+  r.Step(start);
+  CHECK(!r.overlay->GameInput(start).pad_start);
+  for (int i = 0; i < 12; ++i) r.Step(start);  // 0.2 s > 0.15 s.
+  CHECK(r.overlay->GameInput(start).pad_start);
+  r.Step();  // Release.
+  CHECK(!r.overlay->GameInput({}).pad_start);
+
+  // A quick tap of Start becomes a one-frame tap after release.
+  r.Step(start);
+  CHECK(!r.overlay->GameInput(start).pad_start);
+  r.Step();
+  CHECK(r.overlay->GameInput({}).pad_start);
+  r.Step();
+  CHECK(!r.overlay->GameInput({}).pad_start);
+
+  // Start then LB: the chord opens the viewer and the game never sees Start.
+  r.Step(start);
+  CHECK(!r.overlay->GameInput(start).pad_start);
+  OverlayInput chord = start;
+  chord.pad_lb = true;
+  r.Step(chord);
+  CHECK(r.overlay->is_open());
+  const OverlayInput seen = r.overlay->GameInput(chord);
+  CHECK(!seen.pad_start && !seen.pad_lb);
+
+  // Other buttons pass straight through while closed, and F8 never does.
+  r.overlay->Close();
+  r.Step();
+  OverlayInput a;
+  a.pad_a = true;
+  a.f[8] = false;
+  a.f[5] = true;
+  r.Step(a);
+  CHECK(r.overlay->GameInput(a).pad_a);
+  CHECK(r.overlay->GameInput(a).f[5]);
+  OverlayInput f8;
+  f8.f[8] = true;
+  CHECK(!r.overlay->GameInput(f8).f[8]);
+}
+
+TEST(overlay_close_input_is_latched_until_released) {
+  Rig r;
+  r.overlay->Open();
+  r.Settle();
+  CHECK(r.overlay->wants_input());
+  OverlayInput b;
+  b.pad_b = true;
+  r.Step(b);  // B closes the viewer...
+  CHECK(!r.overlay->is_open());
+  CHECK(r.overlay->wants_input());  // ...but the game doesn't get B while it's held.
+  r.Step(b);
+  CHECK(!r.overlay->GameInput(b).pad_b);
+  r.Step();  // Released.
+  CHECK(!r.overlay->wants_input());
+  OverlayInput again = b;
+  r.Step(again);
+  CHECK(r.overlay->GameInput(again).pad_b);  // A new press reaches the game.
+}
+
+TEST(overlay_full_dirty_rect_when_reappearing) {
+  Rig r(OverlayOptions{}, 1920, 1080);
+  r.system.Unlock("c:c1");
+  CHECK(r.Step());
+  const PixelRect first = r.overlay->dirty_rect();
+  CHECK(first.x0 == 0 && first.y0 == 0 && first.x1 == 1920 && first.y1 == 1080);
+  // Later frames of the same popup only touch its area.
+  bool partial = false;
+  for (int i = 0; i < 20; ++i)
+    if (r.Step()) partial |= r.overlay->dirty_rect().width() < 1920;
+  CHECK(partial);
+  for (int i = 0; i < 60 * 8; ++i) r.Step();
+  CHECK(!r.overlay->visible());
+  // Showing again uploads everything.
+  r.system.Unlock("c:c2");
+  CHECK(r.Step());
+  CHECK(r.overlay->dirty_rect().width() == 1920);
+}

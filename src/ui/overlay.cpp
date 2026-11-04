@@ -169,6 +169,24 @@ uint32_t PadButtons(const OverlayInput& in) {
   return b;
 }
 
+void SetPadButtons(OverlayInput& in, uint32_t mask, bool down) {
+  auto set = [&](uint32_t bit, bool& field) {
+    if (mask & bit) field = down;
+  };
+  set(kPadA, in.pad_a);
+  set(kPadB, in.pad_b);
+  set(kPadX, in.pad_x);
+  set(kPadY, in.pad_y);
+  set(kPadLB, in.pad_lb);
+  set(kPadRB, in.pad_rb);
+  set(kPadStart, in.pad_start);
+  set(kPadBack, in.pad_back);
+  set(kPadUp, in.pad_up);
+  set(kPadDown, in.pad_down);
+  set(kPadLeft, in.pad_left);
+  set(kPadRight, in.pad_right);
+}
+
 bool ParsePadChord(std::string_view text, uint32_t& out) {
   static const std::map<std::string, uint32_t, std::less<>> kNames = {
       {"a", kPadA},         {"cross", kPadA},       {"south", kPadA},     {"b", kPadB},
@@ -287,6 +305,13 @@ struct Overlay::Impl {
   float prev_mouse_x = -1, prev_mouse_y = -1;
   uint32_t latched_pad = 0, latched_keys = 0;
   bool chord_held = false;
+  // What the game sees (GameInput): chord buttons held back, taps to replay,
+  // and a latch after closing until everything is released.
+  uint32_t held_back = 0;
+  float held_back_t = 0.0f;
+  uint32_t tap = 0;
+  bool release_latch = false;
+  bool shown = false;  // visible() as of the last returned image.
   bool stick_x_held = false;
   int repeat_dir = 0;  // -1 up, +1 down.
   float repeat_timer = 0;
@@ -729,6 +754,7 @@ struct Overlay::Impl {
       model_stale = true;
     } else {
       credits_screen = false;
+      release_latch = true;
     }
   }
 
@@ -806,6 +832,25 @@ struct Overlay::Impl {
     if (device != before && open) viewer_dirty = true;
     undo.age += dt;
 
+    // Game-facing input. Taps are reported for one frame only.
+    tap = 0;
+    if (release_latch && !open && !pad && !keys && !fkeys && !(in.mouse_present && in.mouse_left) &&
+        !stick) {
+      release_latch = false;
+    }
+    if (!open && options.chord_grace > 0.0f && toggle_chord) {
+      held_back_t += dt;
+      const uint32_t released = held_back & ~pad;
+      held_back &= pad;
+      const uint32_t fresh = pad_down & toggle_chord;
+      if (fresh) {
+        if (!held_back) held_back_t = 0.0f;
+        held_back |= fresh;
+      }
+      if (held_back && held_back_t >= options.chord_grace) held_back = 0;  // Not a chord: let it through.
+      tap = released;
+    }
+
     // The toggle. The chord fires once when its last button goes down, in
     // any order; holding it doesn't repeat.
     bool toggled = false;
@@ -836,6 +881,8 @@ struct Overlay::Impl {
       SetOpen(!open);
       latched_pad = pad;
       latched_keys = keys;
+      held_back = 0;
+      tap = 0;
       return;
     }
     if (!open) return;
@@ -1674,6 +1721,9 @@ struct Overlay::Impl {
     was_viewer_visible = viewer_visible;
     size_changed = false;
     last_dirty = canvas.dirty();
+    const bool now_shown = viewer_visible || !popup_sigs.empty();
+    if (now_shown && !shown) last_dirty = PixelRect{0, 0, width, height};
+    shown = now_shown;
     ++stats.renders;
     stats.last_render_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -1713,7 +1763,23 @@ void Overlay::Open() { impl_->SetOpen(true); }
 void Overlay::Close() { impl_->SetOpen(false); }
 void Overlay::Toggle() { impl_->SetOpen(!impl_->open); }
 bool Overlay::is_open() const { return impl_->open; }
-bool Overlay::wants_input() const { return impl_->open; }
+bool Overlay::wants_input() const { return impl_->open || impl_->release_latch; }
+
+OverlayInput Overlay::GameInput(const OverlayInput& raw) const {
+  const Impl& m = *impl_;
+  if (m.open || m.release_latch) {
+    OverlayInput none;
+    none.mouse_present = raw.mouse_present;
+    none.mouse_x = raw.mouse_x;
+    none.mouse_y = raw.mouse_y;
+    return none;
+  }
+  OverlayInput out = raw;
+  if (m.toggle_key > 0 && m.toggle_key < 13) out.f[m.toggle_key] = false;
+  SetPadButtons(out, m.held_back, false);
+  SetPadButtons(out, m.tap, true);
+  return out;
+}
 
 void Overlay::SetButtonLabels(ButtonLabels labels) {
   impl_->options.buttons = labels;

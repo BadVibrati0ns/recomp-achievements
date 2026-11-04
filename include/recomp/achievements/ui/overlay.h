@@ -63,6 +63,8 @@ enum PadButton : uint32_t {
   kPadRight = 1u << 11,
 };
 uint32_t PadButtons(const OverlayInput& in);
+// Sets or clears the OverlayInput fields for the buttons in `mask`.
+void SetPadButtons(OverlayInput& in, uint32_t mask, bool down);
 
 // "start+lb", "options+l1", "back", ... (names: a b x y lb rb start back up
 // down left right, and cross circle square triangle l1 r1 options select
@@ -102,6 +104,11 @@ struct OverlayOptions {
   // Toggle bindings; the player's "viewer" style keys override them.
   std::string toggle_key = "F8";
   std::string toggle_pad = "start+lb";
+  // How long GameInput() holds back a chord button pressed on its own, so the
+  // game doesn't act on the first half of the chord. A button released within
+  // this time reaches the game as a one-frame tap; one held longer reaches it
+  // late. 0 passes chord buttons straight through.
+  float chord_grace = 0.15f;
   ButtonLabels buttons = ButtonLabels::kXbox;
 
   // Popups keep playing over the open viewer (true), or wait until it closes.
@@ -133,7 +140,9 @@ class Overlay {
   // redraws what changed. True when image() changed and should be uploaded.
   bool Frame(float dt, const OverlayInput& input);
   const Image& image() const;
-  // What changed in the last Frame() that returned true.
+  // What changed in the last Frame() that returned true. The whole image when
+  // the overlay becomes visible again, so a game that stops uploading while
+  // nothing shows never keeps stale pixels.
   PixelRect dirty_rect() const;
   // Anything on screen (popups or viewer); false means image() is clear.
   bool visible() const;
@@ -142,8 +151,14 @@ class Overlay {
   void Close();
   void Toggle();
   bool is_open() const;
-  // True while the viewer is open: keep input from the game.
+  // True while the viewer is open, and after it closes until every key and
+  // button is released (so the key that closed it isn't a fresh press for the
+  // game): keep input from the game.
   bool wants_input() const;
+  // What the game should see this frame, after Frame(): nothing while
+  // wants_input(), the toggle key removed, chord buttons held back for
+  // chord_grace, and late taps of them added back. Call once per frame.
+  OverlayInput GameInput(const OverlayInput& raw) const;
 
   void SetButtonLabels(ButtonLabels labels);
   // A font a style can pick by name ("font": "...").

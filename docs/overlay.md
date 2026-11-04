@@ -12,7 +12,7 @@ The game's whole job, every frame:
 2. call `Frame(dt, input)`,
 3. when it returns true, upload `image()` as a texture (or just `dirty_rect()` of it),
 4. draw that texture over the frame with alpha blending,
-5. while `wants_input()` is true, keep input away from the game.
+5. pass the game `GameInput(input)` instead of the raw input.
 
 It lives in `recomp::achievements_ui_base` (`include/recomp/achievements/ui/overlay.h`).
 
@@ -37,7 +37,7 @@ ui::OverlayInput in;
 ui::FillOverlayInput(in, SDL_GetKeyboardState(nullptr), gamepad);  // gamepad may be null
 if (overlay.Frame(dt, in)) UpdateTexture(texture, overlay.image(), overlay.dirty_rect());
 DrawFullscreenQuad(texture);                       // blend: src * a + dst * (1 - a)
-const bool game_gets_input = !overlay.wants_input();
+const ui::OverlayInput for_game = overlay.GameInput(in);  // what the game should see
 ```
 
 `ui::ButtonLabelsFor(gamepad)` tells PlayStation pads apart; pass it to `overlay.SetButtonLabels()` so the
@@ -63,8 +63,30 @@ if (overlay.Frame(dt, in)) UploadToStagingImage(overlay.image().rgba.data());
 BlendOverFrame();
 ```
 
+For a game with its own input bits, `GameInput()` returns the filtered `OverlayInput`, which the game turns
+back into its own bits (`ui::PadButtons()` gives the pad as a mask).
+
 Games that open the list from their own menu (or from `XamShowAchievementsUI`) call `Open()`;
 `Close()`, `Toggle()` and `is_open()` do the rest. `PCM` is 48 kHz stereo float (`ui::Pcm`).
+
+## What the game sees
+
+`GameInput(raw)` returns the input the game should get this frame. Call it once per frame, after `Frame()`:
+
+- **While the viewer is open, nothing.** After it closes, nothing either until every key and button is
+  released (`wants_input()` stays true until then), so the B or Esc that closed it isn't a fresh press.
+- **The toggle key (F8) never reaches the game.**
+- **A chord button pressed on its own is held back for `chord_grace`** (0.15 s), so the game doesn't act
+  on the first half of Start+LB. Held longer, it reaches the game late; released sooner, the game gets it
+  as a one-frame tap. Set `chord_grace = 0` to pass chord buttons straight through.
+
+Games that withhold input their own way can keep checking `wants_input()`.
+
+## Uploading only what changed
+
+`Frame()` returns true only when `image()` changed, and `dirty_rect()` is the area to upload. When nothing
+shows (`visible()` is false), a game can hide its layer and stop uploading. When the overlay shows again,
+`dirty_rect()` covers the whole image, so a texture that missed the final clear is fully refreshed.
 
 ## Input
 
