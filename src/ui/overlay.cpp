@@ -148,7 +148,16 @@ class ScaledPainter : public Painter {
 enum class Device { kKeyboard, kPad };
 
 // What a hint glyph stands for.
-enum class Action { kDetails, kBack, kFilter, kSecrets, kPrevSet, kNextSet, kCredits, kMove };
+enum class Action { kDetails, kBack, kFilter, kSecrets, kPrevSet, kNextSet, kCredits, kMove, kSettings, kAdjust };
+
+// Reset rows and the reset mode's hold bar.
+const Color kDanger = Color::Rgba(222, 76, 66);
+
+// Ids of the settings rows (see Overlay::ViewState::setting_rows).
+constexpr std::string_view kRowSound = "sound";
+constexpr std::string_view kRowVolume = "volume";
+constexpr std::string_view kRowResetPick = "reset:pick";
+constexpr std::string_view kRowResetAll = "reset:all";
 
 }  // namespace
 
@@ -323,6 +332,7 @@ struct Overlay::Impl {
     int filter = 0;
     bool reveal = false;
     int selected = 0;
+    bool credits = false, settings = false, reset_mode = false;
   } undo;
   float clock = 0;
 
@@ -330,6 +340,8 @@ struct Overlay::Impl {
   bool open = false;
   float open_t = 0;  // 0..1 animation.
   bool credits_screen = false;
+  bool settings_screen = false;
+  bool reset_mode = false;  // The list picks achievements to reset.
   size_t tab = 0;  // 0 = all sets when there are several.
   int filter = 0;  // 0 all, 1 unlocked, 2 locked.
   bool reveal = false;
@@ -355,10 +367,33 @@ struct Overlay::Impl {
   float content_h = 0, credits_h = 0;
   System::Totals totals;
 
+  // The settings page: headings and rows, in list space like entries.
+  struct SettingRow {
+    enum Kind { kHeading, kSound, kVolume, kSet, kResetPick, kResetSet, kResetAll } kind = kHeading;
+    std::string id, set_id;
+    std::string title, detail, aside;  // aside: a heading's right-hand note.
+    bool on = false;
+    float y = 0, h = 0;
+  };
+  std::vector<const AchievementSet*> all_sets;  // Including the ones turned off.
+  std::vector<SettingRow> setting_rows;
+  std::vector<int> setting_items;  // Indices of the rows that can be selected.
+  int setting_sel = 0;
+  std::string setting_sel_id;
+  float settings_h = 0;
+  PopupSoundSettings sound;
+  // Hold to confirm (resets): what is held, for how long, and the last one
+  // that went through (shown until the selection moves).
+  std::string hold_id;
+  float hold_t = 0;
+  bool hold_needs_release = false;
+  std::string done_id;
+
   // Hit areas from the last viewer render.
   std::vector<std::pair<RectF, size_t>> tab_hits;
   RectF filter_hits[3];
   RectF secrets_hit;
+  RectF gear_hit;
   float icon_poll = 0;
   std::vector<void*> drawn_icons;
   std::vector<int> drawn_rows;
@@ -411,11 +446,18 @@ struct Overlay::Impl {
 
     if (own_center) {
       center->UseStyles(*styles);
-      if (options.sound_handler) {
-        center->SetSoundHandler(options.sound_handler);
-      } else if (options.play_sound) {
+      if (options.sound_handler || options.play_sound) {
         center->SetSoundHandler([this](const NotificationCenter::SoundRequest& r) {
-          if (auto pcm = bank.ForEvent(r.kind, r.tier, r.sound)) options.play_sound(pcm, r.volume, r.kind);
+          // The player's choice, read at play time so it never lags the page.
+          const float gain = PopupSoundGain(GetPopupSoundSettings(system), r.volume);
+          if (gain <= 0.0f) return;
+          if (options.sound_handler) {
+            NotificationCenter::SoundRequest scaled = r;
+            scaled.volume = gain;
+            options.sound_handler(scaled);
+          } else if (auto pcm = bank.ForEvent(r.kind, r.tier, r.sound)) {
+            options.play_sound(pcm, gain, r.kind);
+          }
         });
       }
       center->Attach(system);
@@ -453,11 +495,20 @@ struct Overlay::Impl {
   float BaseScale() const { return ui_scale > 0 ? ui_scale : height / 1080.0f; }
 
   const AchievementSet* TabSet() const {
-    if (sets.empty()) return nullptr;
-    if (tab < tab_ids.size() && !tab_ids[tab].empty())
+    if (sets.empty()) return all_sets.empty() ? nullptr : all_sets.front();
+    if (!settings_screen && tab < tab_ids.size() && !tab_ids[tab].empty())
       for (auto* s : sets)
         if (s->id == tab_ids[tab]) return s;
     return sets.front();
+  }
+
+  bool SettingsAvailable() const {
+    return options.show_settings && (options.settings_sound || options.settings_sets || options.settings_reset);
+  }
+
+  // The tab's set id; "" for all sets (and on the settings page).
+  std::string Scope() const {
+    return !settings_screen && tab < tab_ids.size() ? tab_ids[tab] : std::string();
   }
 
   std::shared_ptr<const Style> ChromeStyle() const { return styles->Resolve(TabSet()); }
@@ -518,7 +569,10 @@ struct Overlay::Impl {
   bool Hidden(const Achievement& a, bool unlocked) const { return a.secret && !unlocked && !reveal; }
 
   void BuildModel() {
-    sets = system.sets();
+    // Sets that are off leave the tabs, "All" and the totals.
+    sets = system.enabled_sets();
+    all_sets = system.sets();
+    sound = GetPopupSoundSettings(system);
     // Keep the tab on the same set across rebuilds.
     const std::string cur_tab = tab < tab_ids.size() ? tab_ids[tab] : std::string();
     tab_ids.clear();
@@ -537,7 +591,7 @@ struct Overlay::Impl {
 
     const auto st = ChromeStyle();
     const Metrics m = MakeMetrics(*st);
-    const std::string scope = tab < tab_ids.size() ? tab_ids[tab] : std::string();
+    const std::string scope = Scope();
     totals = system.GetTotals(scope);
     entries.clear();
     rows.clear();
@@ -596,6 +650,7 @@ struct Overlay::Impl {
     }
     content_h = y;
     BuildCredits(m);
+    BuildSettings(m);
 
     // Keep the selection on the same achievement when it's still listed.
     int found = -1;
@@ -643,7 +698,7 @@ struct Overlay::Impl {
       }
     }
     if (options.show_credits && !a.credits.empty() && !e.hidden) e.credits = "Credits: " + CreditsLine(a.credits);
-    const bool is_open = expanded.count(a.key) > 0;
+    const bool is_open = expanded.count(a.key) > 0 && !reset_mode;
     const auto full = Canvas::WrapText(reg, m.desc, e.description, m.text_w, 12);
     e.expandable = !e.checklist.empty() || !e.credits.empty() || full.size() > 2;
     e.lines = Canvas::WrapText(reg, m.desc, e.description, m.text_w, is_open ? 12 : 2);
@@ -676,7 +731,7 @@ struct Overlay::Impl {
         y += size + 6.0f * m.s;
       }
     };
-    const std::string scope = tab < tab_ids.size() ? tab_ids[tab] : std::string();
+    const std::string scope = Scope();
     add("Credits", 26.0f * m.s, true, false);
     const auto views = system.Snapshot();
     for (const AchievementSet* set : sets) {
@@ -702,8 +757,100 @@ struct Overlay::Impl {
     credits_h = y;
   }
 
+  float ContentHeight() const { return credits_screen ? credits_h : settings_screen ? settings_h : content_h; }
+
   float MaxScroll(const Metrics& m) const {
-    return std::max(0.0f, (credits_screen ? credits_h : content_h) - m.list.height() + 12.0f * m.s);
+    return std::max(0.0f, ContentHeight() - m.list.height() + 12.0f * m.s);
+  }
+
+  static std::string TotalsLine(const System::Totals& t, Platform platform) {
+    std::string out = std::to_string(t.unlocked) + " / " + std::to_string(t.count) + " unlocked";
+    if (t.points)
+      out += "  \xC2\xB7  " + std::to_string(t.unlocked_points) + " / " + std::to_string(t.points) +
+             PointsSuffix(platform);
+    return out;
+  }
+
+  void BuildSettings(const Metrics& m) {
+    setting_rows.clear();
+    setting_items.clear();
+    float y = 0;
+    auto heading = [&](std::string title, std::string aside = {}) {
+      SettingRow r;
+      r.kind = SettingRow::kHeading;
+      r.title = std::move(title);
+      r.aside = std::move(aside);
+      r.y = y;
+      r.h = (setting_rows.empty() ? 32.0f : 48.0f) * m.s;
+      y += r.h;
+      setting_rows.push_back(std::move(r));
+    };
+    auto item = [&](SettingRow::Kind kind, std::string id, std::string title, std::string detail, bool on = false,
+                    std::string set_id = {}) {
+      SettingRow r;
+      r.kind = kind;
+      r.id = std::move(id);
+      r.set_id = std::move(set_id);
+      r.title = std::move(title);
+      r.detail = Canvas::EllipsizeText(*font, m.desc, detail, m.list.width() - 2 * m.row_pad - 330.0f * m.s);
+      r.on = on;
+      r.y = y;
+      r.h = m.name + m.line_gap + m.desc + 2 * m.row_pad + 4.0f * m.s;
+      y += r.h + 8.0f * m.s;
+      setting_items.push_back(static_cast<int>(setting_rows.size()));
+      setting_rows.push_back(std::move(r));
+    };
+    if (options.settings_sound) {
+      heading("Popup sound");
+      item(SettingRow::kSound, std::string(kRowSound), "Sound", "Plays when an achievement unlocks or moves forward.",
+           sound.enabled);
+      item(SettingRow::kVolume, std::string(kRowVolume), "Volume",
+           sound.enabled ? "How loud popup sounds play." : "Sound is off.");
+    }
+    if (options.settings_sets && !all_sets.empty()) {
+      const size_t on = sets.size();
+      heading("Achievement sets", std::to_string(on) + " of " + std::to_string(all_sets.size()) + " on");
+      for (const AchievementSet* set : all_sets) {
+        const bool enabled = std::find(sets.begin(), sets.end(), set) != sets.end();
+        std::string detail = TotalsLine(system.GetTotals(set->id), set->platform);
+        if (!enabled) detail = "Off: hidden and can't unlock. Progress is kept.  " + detail;
+        item(SettingRow::kSet, "set:" + set->id, set->title.empty() ? set->id : set->title, detail, enabled, set->id);
+      }
+    }
+    if (options.settings_reset && !all_sets.empty()) {
+      heading("Reset progress", "Hold to confirm. This can't be undone.");
+      if (!sets.empty())
+        item(SettingRow::kResetPick, std::string(kRowResetPick), "Reset chosen achievements\xE2\x80\xA6",
+             "Pick achievements in the list and hold to reset each one.");
+      if (all_sets.size() > 1) {
+        for (const AchievementSet* set : all_sets) {
+          const auto t = system.GetTotals(set->id);
+          const std::string title = set->title.empty() ? set->id : set->title;
+          item(SettingRow::kResetSet, "reset:set:" + set->id, "Reset " + title,
+               "Clears " + std::to_string(t.unlocked) + (t.unlocked == 1 ? " unlock" : " unlocks") +
+                   " and all progress in this set.",
+               false, set->id);
+        }
+      }
+      const auto t = system.GetTotals();
+      item(SettingRow::kResetAll, std::string(kRowResetAll), "Reset all progress",
+           all_sets.size() > 1 ? "Every set, including sets that are off."
+                               : "Clears " + std::to_string(t.unlocked) + (t.unlocked == 1 ? " unlock" : " unlocks") +
+                                     " and all progress.");
+    }
+    settings_h = y;
+    // Keep the selection on the same row when it's still there.
+    int found = -1;
+    for (size_t i = 0; i < setting_items.size(); ++i)
+      if (setting_rows[setting_items[i]].id == setting_sel_id) found = static_cast<int>(i);
+    setting_sel =
+        found >= 0 ? found : std::clamp(setting_sel, 0, std::max(0, static_cast<int>(setting_items.size()) - 1));
+    setting_sel_id = setting_items.empty() ? std::string() : setting_rows[setting_items[setting_sel]].id;
+  }
+
+  const SettingRow* SelectedSetting() const {
+    if (setting_items.empty()) return nullptr;
+    return &setting_rows[setting_items[setting_sel]];
   }
 
   void EnsureModel() {
@@ -754,13 +901,184 @@ struct Overlay::Impl {
       model_stale = true;
     } else {
       credits_screen = false;
+      settings_screen = false;
+      reset_mode = false;
       release_latch = true;
     }
+    ClearHold();
+  }
+
+  void ClearHold() {
+    hold_id.clear();
+    hold_t = 0;
+  }
+
+  // One frame of a hold-to-confirm on `id`: starts on a fresh press, runs
+  // while held, and is true once, when it has been held long enough.
+  // Releasing or moving away cancels it.
+  bool UpdateHold(const std::string& id, bool pressed, bool held, float dt) {
+    if (hold_needs_release) {
+      if (!held) hold_needs_release = false;
+      return false;
+    }
+    if (!hold_id.empty() && hold_id != id) ClearHold(), viewer_dirty = true;
+    if (hold_id.empty()) {
+      if (!pressed || !held) return false;
+      hold_id = id;
+      hold_t = 0;
+      done_id.clear();
+    }
+    if (!held) {
+      ClearHold();
+      viewer_dirty = true;
+      return false;
+    }
+    // A long frame (a hitch, a breakpoint) mustn't confirm in one go.
+    hold_t += std::min(dt, 0.1f);
+    viewer_dirty = true;
+    if (hold_t < std::max(0.1f, options.reset_hold_seconds)) return false;
+    ClearHold();
+    hold_needs_release = true;
+    done_id = id;
+    return true;
+  }
+
+  float HoldFraction(std::string_view id) const {
+    if (hold_id != id) return 0.0f;
+    return std::clamp(hold_t / std::max(0.1f, options.reset_hold_seconds), 0.0f, 1.0f);
+  }
+
+  void ShowSettings(bool show, const Metrics& m) {
+    settings_screen = show && SettingsAvailable();
+    credits_screen = false;
+    reset_mode = false;
+    ClearHold();
+    done_id.clear();
+    scroll = scroll_target = 0;
+    if (settings_screen) SelectSetting(setting_sel, m, true);
+    else Select(selected, m, true);
+    viewer_dirty = true;
+  }
+
+  void SelectSetting(int index, const Metrics& m, bool instant = false) {
+    if (setting_items.empty()) return;
+    const int before = setting_sel;
+    setting_sel = std::clamp(index, 0, static_cast<int>(setting_items.size()) - 1);
+    if (setting_sel != before) done_id.clear();
+    const SettingRow& r = setting_rows[setting_items[setting_sel]];
+    setting_sel_id = r.id;
+    const float margin = 16.0f * m.s;
+    float top = r.y - margin;
+    // Bring the heading above along.
+    const int at = setting_items[setting_sel];
+    if (at > 0 && setting_rows[at - 1].kind == SettingRow::kHeading) top = setting_rows[at - 1].y - margin;
+    if (setting_sel == 0) top = 0;
+    const float bottom = r.y + r.h + margin - m.list.height();
+    if (scroll_target > top) scroll_target = top;
+    if (scroll_target < bottom) scroll_target = std::min(bottom, top);
+    scroll_target = std::clamp(scroll_target, 0.0f, MaxScroll(m));
+    if (instant) scroll = scroll_target;
+    viewer_dirty = true;
+  }
+
+  void SetVolume(float volume) {
+    PopupSoundSettings next = sound;
+    next.volume = std::clamp(std::round(volume * 10.0f) / 10.0f, 0.0f, 1.0f);
+    if (next == sound) return;
+    if (next.volume > 0.0f) next.enabled = true;
+    SetPopupSoundSettings(system, next);
+    sound = next;
+    PlayPreview();
+  }
+
+  void SetSoundOn(bool on) {
+    PopupSoundSettings next = sound;
+    next.enabled = on;
+    // Turning sound on at 0% would still be silent.
+    if (on && next.volume <= 0.0f) next.volume = 0.5f;
+    if (next == sound) return;
+    SetPopupSoundSettings(system, next);
+    sound = next;
+    if (on) PlayPreview();
+  }
+
+  // The progress sound at the new setting, so the player hears the change.
+  void PlayPreview() {
+    if (!own_center) return;
+    const auto st = ChromeStyle();
+    const float gain = PopupSoundGain(sound, st->sound.enabled ? st->sound.volume : 0.0f);
+    if (gain <= 0.0f) return;
+    if (options.sound_handler) {
+      NotificationCenter::SoundRequest r{NotificationKind::kProgress, Tier::kNone, st->sound.progress, gain, {}};
+      r.notification.kind = NotificationKind::kProgress;
+      r.notification.style = st;
+      options.sound_handler(r);
+    } else if (options.play_sound) {
+      if (auto pcm = bank.ForEvent(NotificationKind::kProgress, Tier::kNone, st->sound.progress))
+        options.play_sound(pcm, gain, NotificationKind::kProgress);
+    }
+  }
+
+  // A to toggle or open; true when it acted.
+  bool ActivateSetting(const SettingRow& r, const Metrics& m) {
+    switch (r.kind) {
+      case SettingRow::kSound: SetSoundOn(!sound.enabled); return true;
+      case SettingRow::kSet: system.SetSetEnabled(r.set_id, !r.on); return true;
+      case SettingRow::kResetPick:
+        settings_screen = false;
+        reset_mode = true;
+        filter = 0;
+        ClearHold();
+        done_id.clear();
+        scroll = scroll_target = 0;
+        selected = 0;
+        selected_key.clear();
+        BuildModel();
+        Select(0, m, true);
+        return true;
+      default: return false;
+    }
+  }
+
+  // Left / right on a settings row: volume steps, switches off / on.
+  void AdjustSetting(const SettingRow& r, int dir) {
+    switch (r.kind) {
+      case SettingRow::kVolume: SetVolume(sound.volume + 0.1f * dir); break;
+      case SettingRow::kSound: SetSoundOn(dir > 0); break;
+      case SettingRow::kSet:
+        if (r.on != (dir > 0)) system.SetSetEnabled(r.set_id, dir > 0);
+        break;
+      default: break;
+    }
+  }
+
+  void ConfirmReset(const SettingRow& r) {
+    if (r.kind == SettingRow::kResetSet) system.ResetSet(r.set_id);
+    else if (r.kind == SettingRow::kResetAll) system.Reset();
+  }
+
+  // Up/down with key repeat: the step this frame.
+  int RepeatStep(int dir, float dt) {
+    int step = 0;
+    if (dir != repeat_dir) {
+      repeat_dir = dir;
+      repeat_timer = 0.38f;
+      step = dir;
+    } else if (dir) {
+      repeat_timer -= dt;
+      if (repeat_timer <= 0) {
+        repeat_timer += 0.065f;
+        step = dir;
+      }
+    }
+    return step;
   }
 
   void Select(int index, const Metrics& m, bool instant = false) {
     if (rows.empty()) return;
+    const int before = selected;
     selected = std::clamp(index, 0, static_cast<int>(rows.size()) - 1);
+    if (selected != before) done_id.clear();
     const Entry& e = entries[rows[selected]];
     selected_key = e.key;
     // Keep the row (and any heading right above it) in view.
@@ -812,7 +1130,7 @@ struct Overlay::Impl {
     Select(selected, MakeMetrics(*st));
   }
 
-  void SaveUndo() { undo = {0.0f, tab, filter, reveal, selected}; }
+  void SaveUndo() { undo = {0.0f, tab, filter, reveal, selected, credits_screen, settings_screen, reset_mode}; }
 
   void HandleInput(float dt, const OverlayInput& in) {
     const uint32_t pad = PadButtons(in);
@@ -864,6 +1182,9 @@ struct Overlay::Impl {
         filter = undo.filter;
         reveal = undo.reveal;
         selected = undo.selected;
+        credits_screen = undo.credits;
+        settings_screen = undo.settings;
+        reset_mode = undo.reset_mode;
         model_stale = true;
       }
     }
@@ -900,6 +1221,13 @@ struct Overlay::Impl {
         credits_screen = false;
         scroll = scroll_target = 0;
         Select(selected, m, true);
+      } else if (settings_screen) {
+        ShowSettings(false, m);
+      } else if (reset_mode) {
+        // Back to the settings page, on the row that started it.
+        for (size_t i = 0; i < setting_items.size(); ++i)
+          if (setting_rows[setting_items[i]].id == kRowResetPick) setting_sel = static_cast<int>(i);
+        ShowSettings(true, m);
       } else {
         SetOpen(false);
       }
@@ -908,9 +1236,21 @@ struct Overlay::Impl {
     if (options.show_credits && ((pd & kPadBack) || (f_down & 2u))) {
       if (chord_member) SaveUndo();
       credits_screen = !credits_screen;
+      settings_screen = false;
+      reset_mode = false;
+      ClearHold();
       scroll = scroll_target = 0;
       if (!credits_screen) Select(selected, m, true);
       viewer_dirty = true;
+      return;
+    }
+    if (SettingsAvailable() && ((pd & kPadStart) || (f_down & 4u))) {
+      if (chord_member) SaveUndo();
+      ShowSettings(!settings_screen, m);
+      return;
+    }
+    if (settings_screen) {
+      HandleSettingsInput(dt, in, m, pd, kd, ph, kh, mouse_moved, mouse_click);
       return;
     }
 
@@ -943,7 +1283,16 @@ struct Overlay::Impl {
         SetReveal(!reveal);
         return;
       }
-      if ((pd & kPadA) || (kd & kKeyEnter)) {
+      if (reset_mode) {
+        // Hold A / Enter (or the mouse on the row) to reset the selected one.
+        if (!rows.empty()) {
+          const Entry& e = entries[rows[selected]];
+          const bool over = in.mouse_present && in.mouse_left && MouseOverRow(in, m, e);
+          const bool pressed = (pd & kPadA) || (kd & kKeyEnter) || (mouse_click && over);
+          const bool held = (ph & kPadA) || (kh & kKeyEnter) || over;
+          if (UpdateHold(e.key, pressed, held, dt)) system.Reset(std::vector<std::string>{e.key});
+        }
+      } else if ((pd & kPadA) || (kd & kKeyEnter)) {
         if (chord_member) SaveUndo();
         ToggleExpanded();
         return;
@@ -954,18 +1303,7 @@ struct Overlay::Impl {
     int dir = 0;
     if ((ph & kPadUp) || (kh & kKeyUp) || in.pad_ly < -0.5f) dir = -1;
     if ((ph & kPadDown) || (kh & kKeyDown) || in.pad_ly > 0.5f) dir = 1;
-    int step = 0;
-    if (dir != repeat_dir) {
-      repeat_dir = dir;
-      repeat_timer = 0.38f;
-      step = dir;
-    } else if (dir) {
-      repeat_timer -= dt;
-      if (repeat_timer <= 0) {
-        repeat_timer += 0.065f;
-        step = dir;
-      }
-    }
+    int step = RepeatStep(dir, dt);
     const int page = std::max(1, static_cast<int>(m.list.height() / (m.icon + m.row_pad * 2 + 8.0f * m.s)) - 1);
     if (kd & kKeyPageUp) step = -page;
     if (kd & kKeyPageDown) step = page;
@@ -999,6 +1337,7 @@ struct Overlay::Impl {
           if (best != selected) {
             selected = best;
             selected_key = entries[rows[best]].key;
+            done_id.clear();
           }
         }
       }
@@ -1015,6 +1354,10 @@ struct Overlay::Impl {
         return;
       }
       if (mouse_click) {
+        if (inside(gear_hit)) {
+          ShowSettings(true, m);
+          return;
+        }
         for (const auto& [r, t] : tab_hits)
           if (inside(r)) {
             SetTab(t, m);
@@ -1038,14 +1381,123 @@ struct Overlay::Impl {
             if (static_cast<int>(i) != selected) {
               selected = static_cast<int>(i);
               selected_key = e.key;
+              done_id.clear();
               viewer_dirty = true;
             }
-            if (mouse_click) ToggleExpanded();
+            if (mouse_click && !reset_mode) ToggleExpanded();
             break;
           }
         }
       }
     }
+  }
+
+  bool MouseOverRow(const OverlayInput& in, const Metrics& m, const Entry& e) const {
+    if (!in.mouse_present) return false;
+    const float ly = in.mouse_y - m.list.y0 + std::round(scroll);
+    return in.mouse_x >= m.list.x0 && in.mouse_x < m.list.x1 && in.mouse_y >= m.list.y0 && in.mouse_y < m.list.y1 &&
+           ly >= e.y && ly < e.y + e.h;
+  }
+
+  // The settings row under the mouse; -1 for none.
+  int SettingAt(float mx, float my, const Metrics& m) const {
+    if (mx < m.list.x0 || mx >= m.list.x1 || my < m.list.y0 || my >= m.list.y1) return -1;
+    const float ly = my - m.list.y0 + std::round(scroll);
+    for (size_t i = 0; i < setting_items.size(); ++i) {
+      const SettingRow& r = setting_rows[setting_items[i]];
+      if (ly >= r.y && ly < r.y + r.h) return static_cast<int>(i);
+    }
+    return -1;
+  }
+
+  // The volume slider's track, for drawing and clicks.
+  RectF VolumeTrack(const RectF& row, const Metrics& m) const {
+    // Room on the right for "100%" and the arrow beside the track.
+    const float right = row.x1 - m.row_pad - 4.0f * m.s - TextW(true, 18.0f * m.s, "100%") - 34.0f * m.s;
+    const float cy = (row.y0 + row.y1) * 0.5f;
+    return {right - 260.0f * m.s, cy - 4.0f * m.s, right, cy + 4.0f * m.s};
+  }
+
+  void HandleSettingsInput(float dt, const OverlayInput& in, const Metrics& m, uint32_t pd, uint32_t kd, uint32_t ph,
+                           uint32_t kh, bool mouse_moved, bool mouse_click) {
+    int dir = 0;
+    if ((ph & kPadUp) || (kh & kKeyUp) || in.pad_ly < -0.5f) dir = -1;
+    if ((ph & kPadDown) || (kh & kKeyDown) || in.pad_ly > 0.5f) dir = 1;
+    int step = RepeatStep(dir, dt);
+    if (kd & kKeyPageUp) step = -4;
+    if (kd & kKeyPageDown) step = 4;
+    if (kd & kKeyHome) step = -1000000;
+    if (kd & kKeyEnd) step = 1000000;
+    if (step) SelectSetting(setting_sel + step, m);
+
+    // Left / right adjust the row. Not LB / RB: LB is half of the closing
+    // chord, and a set turned off on the way out couldn't be undone.
+    int adjust = 0;
+    if ((pd & kPadLeft) || (kd & kKeyLeft)) adjust = -1;
+    if ((pd & kPadRight) || (kd & kKeyRight)) adjust = 1;
+    const bool sx = std::fabs(in.pad_lx) > 0.6f;
+    if (sx && !stick_x_held) adjust = in.pad_lx < 0 ? -1 : 1;
+    if (std::fabs(in.pad_lx) < 0.3f) stick_x_held = false;
+    if (sx) stick_x_held = true;
+
+    // Mouse: hover selects, a click toggles, sets the volume or starts a hold.
+    int hover = -1;
+    if (in.mouse_present) {
+      hover = SettingAt(in.mouse_x, in.mouse_y, m);
+      if ((mouse_moved || mouse_click) && hover >= 0 && hover != setting_sel && !(in.mouse_left && !mouse_click)) {
+        setting_sel = hover;
+        setting_sel_id = setting_rows[setting_items[hover]].id;
+        done_id.clear();
+        viewer_dirty = true;
+      }
+      if (in.mouse_wheel != 0) {
+        scroll_target = std::clamp(scroll_target - in.mouse_wheel * 110.0f * m.s, 0.0f, MaxScroll(m));
+        viewer_dirty = true;
+      }
+      if (mouse_click && hover < 0 && !(in.mouse_x >= m.panel.x0 && in.mouse_x < m.panel.x1 &&
+                                        in.mouse_y >= m.panel.y0 && in.mouse_y < m.panel.y1)) {
+        SetOpen(false);
+        return;
+      }
+      if (mouse_click && in.mouse_x >= gear_hit.x0 && in.mouse_x < gear_hit.x1 && in.mouse_y >= gear_hit.y0 &&
+          in.mouse_y < gear_hit.y1) {
+        ShowSettings(false, m);
+        return;
+      }
+    }
+    if (std::fabs(in.pad_ry) > 0.2f) {
+      scroll_target = std::clamp(scroll_target + in.pad_ry * 1500.0f * m.s * dt, 0.0f, MaxScroll(m));
+      viewer_dirty = true;
+    }
+
+    const SettingRow* r = SelectedSetting();
+    if (!r) return;
+    const SettingRow row = *r;  // The calls below rebuild the rows.
+    const bool over = hover == setting_sel;
+    if (row.kind == SettingRow::kResetSet || row.kind == SettingRow::kResetAll) {
+      const bool pressed = (pd & kPadA) || (kd & kKeyEnter) || (mouse_click && over);
+      const bool held = (ph & kPadA) || (kh & kKeyEnter) || (in.mouse_present && in.mouse_left && over);
+      if (UpdateHold(row.id, pressed, held, dt)) ConfirmReset(row);
+      return;
+    }
+    if ((pd & kPadA) || (kd & kKeyEnter)) {
+      ActivateSetting(row, m);
+      return;
+    }
+    if (mouse_click && over) {
+      if (row.kind == SettingRow::kVolume) {
+        // Click on the track sets the level; elsewhere on the row, nothing.
+        const RectF rr{m.list.x0, m.list.y0 + row.y - std::round(scroll), m.list.x1,
+                       m.list.y0 + row.y - std::round(scroll) + row.h};
+        const RectF t = VolumeTrack(rr, m);
+        if (in.mouse_x >= t.x0 - 12.0f * m.s && in.mouse_x <= t.x1 + 12.0f * m.s)
+          SetVolume((in.mouse_x - t.x0) / t.width());
+      } else {
+        ActivateSetting(row, m);
+      }
+      return;
+    }
+    if (adjust) AdjustSetting(row, adjust);
   }
 
   // ---- Drawing helpers ----------------------------------------------------------
@@ -1071,6 +1523,8 @@ struct Overlay::Impl {
         case Action::kNextSet: label = "\xE2\x86\x92"; break;  // →
         case Action::kCredits: label = "F1"; break;
         case Action::kMove: label = "\xE2\x86\x91\xE2\x86\x93"; break;  // ↑↓
+        case Action::kSettings: label = "F2"; break;
+        case Action::kAdjust: label = "\xE2\x86\x90\xE2\x86\x92"; break;  // ←→
       }
       const float ts = 14.0f * s;
       const float w = std::max(d, TextW(true, ts, label) + 14.0f * s);
@@ -1137,6 +1591,16 @@ struct Overlay::Impl {
       case Action::kPrevSet: return shoulder(ps ? "L1" : "LB");
       case Action::kNextSet: return shoulder(ps ? "R1" : "RB");
       case Action::kCredits: return shoulder(ps ? "SELECT" : "BACK");
+      case Action::kSettings: return shoulder(ps ? "OPTIONS" : "START");
+      case Action::kAdjust: {
+        // The d-pad with its left and right arms lit.
+        if (draw) {
+          const float cx = x + r, w = r * 0.36f;
+          canvas.FillRect({cx - w, cy - r, cx + w, cy + r}, WithAlpha(th.text, 0.3f * alpha), w * 0.5f);
+          canvas.FillRect({cx - r, cy - w, cx + r, cy + w}, WithAlpha(th.text, 0.85f * alpha), w * 0.5f);
+        }
+        return d;
+      }
       case Action::kMove: {
         // A d-pad cross.
         if (draw) {
@@ -1206,8 +1670,9 @@ struct Overlay::Impl {
   void DrawRow(const Entry& e, float y, bool sel, const Metrics& m, const Theme& th, float alpha) {
     const float s = m.s;
     const RectF r{m.list.x0, y, m.list.x1, y + e.h};
-    canvas.FillRect(r, WithAlpha(sel ? th.row_selected : th.row, alpha), 10.0f * s);
-    if (sel) canvas.StrokeRect(r, WithAlpha(th.accent, 0.85f * alpha), 10.0f * s, 2.0f * s);
+    const Color sel_fill = reset_mode ? Mix(th.panel, kDanger, 0.14f) : th.row_selected;
+    canvas.FillRect(r, WithAlpha(sel ? sel_fill : th.row, alpha), 10.0f * s);
+    if (sel) canvas.StrokeRect(r, WithAlpha(reset_mode ? kDanger : th.accent, 0.85f * alpha), 10.0f * s, 2.0f * s);
     const float ix = r.x0 + m.row_pad, iy = y + m.row_pad;
     DrawIconTile(e, {ix, iy, ix + m.icon, iy + m.icon}, th, alpha, s);
 
@@ -1273,8 +1738,12 @@ struct Overlay::Impl {
       ty += m.meta;
     }
 
-    const bool is_open = expanded.count(a.key) > 0 && e.expandable;
-    if (sel && e.expandable) {
+    const bool is_open = expanded.count(a.key) > 0 && e.expandable && !reset_mode;
+    if (reset_mode && sel) {
+      DrawHoldFill(r, HoldFraction(e.key), s, alpha);
+      const float cy = y + e.h - m.row_pad - 10.0f * s;
+      DrawHoldHint(e.key, rx, cy, s * 0.85f, th, alpha);
+    } else if (sel && e.expandable) {
       // "Details" / "Less" hint at the row's bottom right.
       const char* label = is_open ? "Less" : "Details";
       const float cy = y + e.h - m.row_pad - 10.0f * s;
@@ -1313,6 +1782,131 @@ struct Overlay::Impl {
     }
   }
 
+  // The danger-coloured fill of a hold-to-confirm, growing from the left.
+  void DrawHoldFill(const RectF& r, float frac, float s, float alpha) {
+    if (frac <= 0.0f) return;
+    canvas.PushClip(RectF{r.x0, r.y0, r.x0 + r.width() * frac, r.y1});
+    canvas.FillRect(r, WithAlpha(kDanger, 0.30f * alpha), 10.0f * s);
+    canvas.PopClip();
+    canvas.StrokeRect(r, WithAlpha(kDanger, alpha), 10.0f * s, 2.0f * s);
+  }
+
+  // "Hold to reset" right-aligned at rx, or "Reset" with a tick once done.
+  void DrawHoldHint(const std::string& id, float rx, float cy, float s, const Theme& th, float alpha) {
+    if (done_id == id) {
+      const float ts = 15.0f * s, br = 10.0f * s;
+      const float w = br * 2 + 8.0f * s + TextW(true, ts, "Reset");
+      canvas.FillCircle(rx - w + br, cy, br, WithAlpha(th.accent, alpha));
+      DrawCheck(rx - w + br, cy, br * 0.55f, 2.0f * s, WithAlpha(OnColor(th.accent), alpha));
+      DrawText(true, ts, rx - w + br * 2 + 8.0f * s, cy - ts * 0.5f, "Reset", WithAlpha(th.text, alpha));
+      return;
+    }
+    const char* label = hold_id == id ? "Keep holding" : "Hold to reset";
+    const float w = DrawHint(Action::kDetails, label, 0, cy, s, th, alpha, false);
+    DrawHint(Action::kDetails, label, rx - w, cy, s, th, alpha);
+  }
+
+  void DrawGear(float cx, float cy, float r, const Color& c, const Color& hole) {
+    for (int i = 0; i < 8; ++i) {
+      const float a = i * 3.14159265f / 4.0f;
+      canvas.Line(cx + std::cos(a) * r * 0.5f, cy + std::sin(a) * r * 0.5f, cx + std::cos(a) * r * 0.86f,
+                  cy + std::sin(a) * r * 0.86f, r * 0.38f, c);
+    }
+    canvas.FillCircle(cx, cy, r * 0.7f, c);
+    canvas.FillCircle(cx, cy, r * 0.3f, hole);
+  }
+
+  // An on/off switch, right edge at rx, centred on cy.
+  void DrawSwitch(bool on, float rx, float cy, float s, const Theme& th, float alpha) {
+    const float w = 52.0f * s, h = 28.0f * s;
+    const RectF r{rx - w, cy - h * 0.5f, rx, cy + h * 0.5f};
+    canvas.FillRect(r, on ? WithAlpha(th.accent, alpha) : WithAlpha(Mix(th.panel, th.text, 0.18f), alpha), h * 0.5f);
+    const float kr = h * 0.5f - 3.5f * s;
+    const float kx = on ? r.x1 - h * 0.5f : r.x0 + h * 0.5f;
+    canvas.FillCircle(kx, cy, kr, WithAlpha(on ? OnColor(th.accent) : th.text, alpha * (on ? 1.0f : 0.75f)));
+    const char* label = on ? "On" : "Off";
+    const float ts = 15.0f * s;
+    DrawText(true, ts, r.x0 - 12.0f * s - TextW(true, ts, label), cy - ts * 0.5f, label,
+             WithAlpha(on ? th.text : th.subtext, alpha));
+  }
+
+  void DrawSettingRow(const SettingRow& row, float y, bool sel, const Metrics& m, const Theme& th, float alpha) {
+    const float s = m.s;
+    const RectF L = m.list;
+    if (row.kind == SettingRow::kHeading) {
+      const float ts = 15.0f * s;
+      const float yy = y + row.h - ts - 10.0f * s;
+      std::string title = row.title;
+      for (char& ch : title)
+        if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+      DrawText(true, ts, L.x0 + 4.0f * s, yy, title, WithAlpha(th.subtext, alpha));
+      if (!row.aside.empty())
+        DrawText(false, ts, L.x1 - 4.0f * s - TextW(false, ts, row.aside), yy, row.aside,
+                 WithAlpha(th.subtext, 0.7f * alpha));
+      return;
+    }
+    const bool reset = row.kind == SettingRow::kResetSet || row.kind == SettingRow::kResetAll;
+    const RectF r{L.x0, y, L.x1, y + row.h};
+    // Reset rows select in red, so the accent never reads as "go ahead".
+    const Color sel_fill = reset ? Mix(th.panel, kDanger, 0.14f) : th.row_selected;
+    canvas.FillRect(r, WithAlpha(sel ? sel_fill : th.row, alpha), 10.0f * s);
+    if (sel) canvas.StrokeRect(r, WithAlpha(reset ? kDanger : th.accent, 0.85f * alpha), 10.0f * s, 2.0f * s);
+    if (reset) DrawHoldFill(r, HoldFraction(row.id), s, alpha);
+
+    // A coloured bar on the left: accent for sets that are on, red for resets.
+    const bool dim = (row.kind == SettingRow::kSet && !row.on) || (row.kind == SettingRow::kVolume && !sound.enabled);
+    if (row.kind == SettingRow::kSet || reset) {
+      const Color bar = reset ? kDanger : row.on ? th.accent : Mix(th.panel, th.text, 0.2f);
+      canvas.FillRect({r.x0 + 8.0f * s, r.y0 + 14.0f * s, r.x0 + 12.0f * s, r.y1 - 14.0f * s}, WithAlpha(bar, alpha),
+                      2.0f * s);
+    }
+    const float tx = r.x0 + m.row_pad + 12.0f * s;
+    const float ty = y + (row.h - (m.name + m.line_gap + m.desc)) * 0.5f;
+    const Color title = reset ? Mix(th.text, kDanger, 0.35f) : th.text;
+    DrawText(true, m.name, tx, ty, Canvas::EllipsizeText(*font_bold, m.name, row.title, r.width() * 0.55f),
+             WithAlpha(title, alpha * (dim ? 0.6f : 1.0f)));
+    DrawText(false, m.desc, tx, ty + m.name + m.line_gap, row.detail, WithAlpha(th.subtext, alpha * (dim ? 0.7f : 0.9f)));
+
+    const float rx = r.x1 - m.row_pad - 4.0f * s, cy = (r.y0 + r.y1) * 0.5f;
+    switch (row.kind) {
+      case SettingRow::kSound:
+      case SettingRow::kSet: DrawSwitch(row.on, rx, cy, s, th, alpha); break;
+      case SettingRow::kVolume: {
+        const RectF t = VolumeTrack(r, m);
+        const float frac = std::clamp(sound.volume, 0.0f, 1.0f);
+        const float a = alpha * (dim ? 0.5f : 1.0f);
+        canvas.ProgressBar(t, frac, WithAlpha(th.track, a), WithAlpha(th.accent, a));
+        const float kx = t.x0 + t.width() * frac;
+        canvas.FillCircle(kx, cy, 11.0f * s, WithAlpha(th.panel, a));
+        canvas.FillCircle(kx, cy, 9.0f * s, WithAlpha(sel ? th.accent : th.text, a));
+        const std::string pct = std::to_string(static_cast<int>(std::lround(frac * 100))) + "%";
+        const float ps = 18.0f * s;
+        DrawText(true, ps, rx - TextW(true, ps, pct), cy - ps * 0.5f, pct, WithAlpha(th.text, a));
+        if (sel) {
+          // Arrows either side of the track say left / right move it.
+          const float k = 5.0f * s, ax0 = t.x0 - 18.0f * s, ax1 = t.x1 + 18.0f * s;
+          canvas.Line(ax0 + k * 0.5f, cy - k, ax0 - k * 0.5f, cy, 2.0f * s, WithAlpha(th.subtext, a));
+          canvas.Line(ax0 - k * 0.5f, cy, ax0 + k * 0.5f, cy + k, 2.0f * s, WithAlpha(th.subtext, a));
+          canvas.Line(ax1 - k * 0.5f, cy - k, ax1 + k * 0.5f, cy, 2.0f * s, WithAlpha(th.subtext, a));
+          canvas.Line(ax1 + k * 0.5f, cy, ax1 - k * 0.5f, cy + k, 2.0f * s, WithAlpha(th.subtext, a));
+        }
+        break;
+      }
+      case SettingRow::kResetPick: {
+        // A chevron: opens the list.
+        const float k = 7.0f * s;
+        canvas.Line(rx - k, cy - k * 1.4f, rx, cy, 2.5f * s, WithAlpha(th.subtext, alpha));
+        canvas.Line(rx, cy, rx - k, cy + k * 1.4f, 2.5f * s, WithAlpha(th.subtext, alpha));
+        break;
+      }
+      case SettingRow::kResetSet:
+      case SettingRow::kResetAll:
+        if (sel || done_id == row.id) DrawHoldHint(row.id, rx, cy, s * 0.9f, th, alpha);
+        break;
+      default: break;
+    }
+  }
+
   void DrawViewer(float alpha) {
     const auto st = ChromeStyle();
     const Theme th = MakeTheme(*st);
@@ -1343,6 +1937,22 @@ struct Overlay::Impl {
     const float hx0 = P.x0 + m.pad, hx1 = P.x1 - m.pad;
     const float hy = P.y0 + m.pad;
     DrawText(true, m.title, hx0, hy, options.title, WithAlpha(th.text, ease));
+    gear_hit = {};
+    if (SettingsAvailable()) {
+      // A settings button beside the title, for the mouse; lit while open.
+      const float bh = 32.0f * s, ts = 15.0f * s, gr = 9.0f * s;
+      const char* label = "Settings";
+      const float bx = hx0 + TextW(true, m.title, options.title) + 18.0f * s;
+      const float bw = 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s;
+      const float by = hy + (m.title - bh) * 0.5f + 2.0f * s;
+      const RectF b{bx, by, bx + bw, by + bh};
+      const Color fill = settings_screen ? th.accent : Mix(th.panel, th.text, 0.09f);
+      const Color ink = settings_screen ? OnColor(th.accent) : th.subtext;
+      canvas.FillRect(b, WithAlpha(fill, ease), bh * 0.5f);
+      DrawGear(bx + 12.0f * s + gr, by + bh * 0.5f, gr, WithAlpha(ink, ease), WithAlpha(fill, ease));
+      DrawText(true, ts, bx + 12.0f * s + gr * 2 + 8.0f * s, by + (bh - ts) * 0.5f, label, WithAlpha(ink, ease));
+      gear_hit = b;
+    }
     {
       const std::string count = std::to_string(totals.unlocked) + " / " + std::to_string(totals.count);
       const float cs = 22.0f * s, ls = 15.0f * s;
@@ -1367,9 +1977,16 @@ struct Overlay::Impl {
                          WithAlpha(th.accent, ease));
     }
 
-    // Set tabs.
+    // Set tabs, or the settings page's title.
     tab_hits.clear();
-    {
+    if (settings_screen) {
+      const float ts = 24.0f * s;
+      DrawText(true, ts, hx0, mm.tabs_y + (m.tab_h - ts) * 0.5f, "Settings", WithAlpha(th.text, ease));
+      const float ss = 15.5f * s;
+      DrawText(false, ss, hx0, mm.filter_y + (m.filter_h - ss) * 0.5f,
+               "Saved for this game, for every profile. Sets that are off keep their progress.",
+               WithAlpha(th.subtext, ease));
+    } else {
       const float ty = mm.tabs_y, th_ = m.tab_h, ts = 17.0f * s;
       const bool many = tab_ids.size() > 1;
       float x0 = hx0, x1 = hx1;
@@ -1411,7 +2028,7 @@ struct Overlay::Impl {
     {
       const float fy = mm.filter_y, fh = m.filter_h, fs = 15.5f * s;
       float x = hx0;
-      if (!credits_screen) {
+      if (!credits_screen && !settings_screen) {
         x += DrawGlyph(Action::kFilter, x, fy + fh * 0.5f, s, th, ease) + 10.0f * s;
         static const char* kNames[3] = {"All", "Unlocked", "Locked"};
         float w = 0;
@@ -1429,7 +2046,18 @@ struct Overlay::Impl {
           x += seg[i];
         }
         secrets_hit = {};
-        if (options.allow_reveal_secrets) {
+        if (reset_mode) {
+          // In place of the secrets toggle: what A does here now.
+          const char* label = "Reset mode";
+          const float ls = 15.5f * s;
+          const float w = TextW(true, ls, label) + 34.0f * s + 14.0f * s;
+          const RectF pill{hx1 - w, fy, hx1, fy + fh};
+          canvas.FillRect(pill, WithAlpha(kDanger, 0.18f * ease), fh * 0.5f);
+          canvas.StrokeRect(pill, WithAlpha(kDanger, 0.9f * ease), fh * 0.5f, 1.5f * s);
+          canvas.FillCircle(pill.x0 + 18.0f * s, fy + fh * 0.5f, 5.0f * s, WithAlpha(kDanger, ease));
+          DrawText(true, ls, pill.x0 + 32.0f * s, fy + (fh - ls) * 0.5f, label,
+                   WithAlpha(Mix(th.text, kDanger, 0.3f), ease));
+        } else if (options.allow_reveal_secrets) {
           const char* label = "Show secrets";
           const float bw = 20.0f * s;
           const float lw = TextW(false, fs, label);
@@ -1467,8 +2095,18 @@ struct Overlay::Impl {
         if (y + c.size < L.y0 || y > L.y1) continue;
         DrawText(c.bold, c.size, L.x0 + m.row_pad, y, c.text, WithAlpha(c.dim ? th.subtext : th.text, ease));
       }
+    } else if (settings_screen) {
+      const SettingRow* cur = SelectedSetting();
+      for (const auto& row : setting_rows) {
+        const float y = L.y0 + row.y - sc;
+        if (y + row.h < L.y0 || y > L.y1) continue;
+        DrawSettingRow(row, y, cur == &row, mm, th, ease);
+      }
     } else if (rows.empty()) {
-      const char* msg = sets.empty()   ? "No achievements yet."
+      const char* msg = sets.empty() && !all_sets.empty()
+                            ? (SettingsAvailable() ? "Every achievement set is off. Turn one on in Settings."
+                                                   : "Every achievement set is off.")
+                        : sets.empty() ? "No achievements yet."
                         : filter == 1 ? "Nothing unlocked yet."
                         : filter == 2 ? "Everything here is unlocked."
                                       : "No achievements in this set.";
@@ -1476,7 +2114,7 @@ struct Overlay::Impl {
       DrawText(false, ms, (L.x0 + L.x1 - TextW(false, ms, msg)) * 0.5f, (L.y0 + L.y1) * 0.5f - ms, msg,
                WithAlpha(th.subtext, ease));
     }
-    if (!credits_screen) {
+    if (!credits_screen && !settings_screen) {
       for (size_t i = 0; i < entries.size(); ++i) {
         const Entry& e = entries[i];
         const float y = L.y0 + e.y - sc;
@@ -1508,7 +2146,7 @@ struct Overlay::Impl {
     canvas.PopClip();
 
     // Scrollbar.
-    const float total = credits_screen ? credits_h : content_h;
+    const float total = ContentHeight();
     if (total > L.height()) {
       const float track_x = P.x1 - m.pad * 0.5f;
       const float h = std::max(30.0f * s, L.height() * L.height() / total);
@@ -1522,17 +2160,41 @@ struct Overlay::Impl {
     canvas.FillRect({P.x0 + m.pad, mm.footer_y, P.x1 - m.pad, mm.footer_y + 1.0f * s}, WithAlpha(th.border, ease));
     const float fy = mm.footer_y + (P.y1 - mm.footer_y) * 0.5f;
     float x = hx0;
+    const float gap = 26.0f * s;
+    const char* back = "Close";
     if (credits_screen) {
-      x += DrawHint(Action::kMove, "Scroll", x, fy, s, th, ease) + 26.0f * s;
+      x += DrawHint(Action::kMove, "Scroll", x, fy, s, th, ease) + gap;
       DrawHint(Action::kCredits, "Achievements", x, fy, s, th, ease);
+      back = "Back";
+    } else if (settings_screen) {
+      x += DrawHint(Action::kMove, "Move", x, fy, s, th, ease) + gap;
+      if (const SettingRow* r = SelectedSetting()) {
+        switch (r->kind) {
+          case SettingRow::kSound:
+          case SettingRow::kSet:
+            x += DrawHint(Action::kDetails, r->on ? "Turn off" : "Turn on", x, fy, s, th, ease) + gap;
+            break;
+          case SettingRow::kVolume: x += DrawHint(Action::kAdjust, "Volume", x, fy, s, th, ease) + gap; break;
+          case SettingRow::kResetPick: x += DrawHint(Action::kDetails, "Choose", x, fy, s, th, ease) + gap; break;
+          case SettingRow::kResetSet:
+          case SettingRow::kResetAll: x += DrawHint(Action::kDetails, "Hold to reset", x, fy, s, th, ease) + gap; break;
+          default: break;
+        }
+      }
+      back = "Back";
+    } else if (reset_mode) {
+      x += DrawHint(Action::kMove, "Move", x, fy, s, th, ease) + gap;
+      if (!rows.empty()) x += DrawHint(Action::kDetails, "Hold to reset", x, fy, s, th, ease) + gap;
+      back = "Done";
     } else {
-      x += DrawHint(Action::kMove, "Move", x, fy, s, th, ease) + 26.0f * s;
+      x += DrawHint(Action::kMove, "Move", x, fy, s, th, ease) + gap;
       if (!rows.empty() && entries[rows[selected]].expandable)
-        x += DrawHint(Action::kDetails, "Details", x, fy, s, th, ease) + 26.0f * s;
-      if (options.show_credits) DrawHint(Action::kCredits, "Credits", x, fy, s, th, ease);
+        x += DrawHint(Action::kDetails, "Details", x, fy, s, th, ease) + gap;
+      if (options.show_credits) x += DrawHint(Action::kCredits, "Credits", x, fy, s, th, ease) + gap;
+      if (SettingsAvailable()) DrawHint(Action::kSettings, "Settings", x, fy, s, th, ease);
     }
-    const float bw = DrawHint(Action::kBack, credits_screen ? "Back" : "Close", 0, fy, s, th, ease, false);
-    DrawHint(Action::kBack, credits_screen ? "Back" : "Close", hx1 - bw, fy, s, th, ease);
+    const float bw = DrawHint(Action::kBack, back, 0, fy, s, th, ease, false);
+    DrawHint(Action::kBack, back, hx1 - bw, fy, s, th, ease);
   }
 
   // Icon textures for the rows on screen, to notice ones that finished loading.
@@ -1760,6 +2422,17 @@ PixelRect Overlay::dirty_rect() const { return impl_->last_dirty; }
 bool Overlay::visible() const { return impl_->open_t > 0.0f || !impl_->popup_sigs.empty(); }
 
 void Overlay::Open() { impl_->SetOpen(true); }
+void Overlay::OpenSettings() {
+  Impl& m = *impl_;
+  m.SetOpen(true);
+  if (!m.SettingsAvailable()) return;
+  // The model may not exist yet; it is rebuilt on the next Frame().
+  m.settings_screen = true;
+  m.credits_screen = false;
+  m.reset_mode = false;
+  m.scroll = m.scroll_target = 0;
+  m.viewer_dirty = true;
+}
 void Overlay::Close() { impl_->SetOpen(false); }
 void Overlay::Toggle() { impl_->SetOpen(!impl_->open); }
 bool Overlay::is_open() const { return impl_->open; }
@@ -1818,6 +2491,12 @@ Overlay::ViewState Overlay::view_state() const {
   }
   v.expanded.assign(m.expanded.begin(), m.expanded.end());
   v.scroll = m.scroll;
+  v.settings = m.settings_screen;
+  v.reset_mode = m.reset_mode;
+  v.tabs = m.tab_ids;
+  for (int i : m.setting_items) v.setting_rows.push_back(m.setting_rows[i].id);
+  v.setting_selected = m.setting_sel_id;
+  v.hold = m.hold_id.empty() ? 0.0f : m.HoldFraction(m.hold_id);
   return v;
 }
 

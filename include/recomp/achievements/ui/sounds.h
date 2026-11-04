@@ -19,7 +19,27 @@
 #include "recomp/achievements/types.h"
 #include "recomp/achievements/ui/notification_center.h"
 
+namespace recomp::achievements {
+class System;
+}
+
 namespace recomp::achievements::ui {
+
+// The player's popup sound choice for this game, kept in the System's
+// settings ("popup_sound": {"enabled": true, "volume": 1.0}). The overlay and
+// PopupUi apply it themselves: volume multiplies the style's, and nothing
+// plays when off. Games that mix popup sounds another way read it here.
+struct PopupSoundSettings {
+  bool enabled = true;
+  float volume = 1.0f;  // 0..1.
+  bool operator==(const PopupSoundSettings&) const = default;
+};
+inline constexpr std::string_view kPopupSoundSetting = "popup_sound";
+PopupSoundSettings GetPopupSoundSettings(const System& system);
+void SetPopupSoundSettings(System& system, const PopupSoundSettings& settings);
+// The gain to play a popup sound at: the style's volume times the player's,
+// 0 when sound is off.
+float PopupSoundGain(const PopupSoundSettings& settings, float style_volume);
 
 constexpr int kSoundSampleRate = 48000;
 constexpr int kSoundChannels = 2;

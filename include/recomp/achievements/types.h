@@ -92,6 +92,10 @@ struct AchievementSet {
   Platform platform = Platform::kCustom;
   std::string category;     // Default category for its achievements.
   uint32_t points_cap = 0;  // 0 = no cap; otherwise points are scaled to fit.
+  // Whether the set counts until the player turns it on or off
+  // (System::SetSetEnabled). Off suits optional packs, e.g. achievements
+  // that need servers that are gone.
+  bool enabled_by_default = true;
   std::vector<Credit> credits;
   nlohmann::json source = nlohmann::json::object();  // Provenance (game id, URL, date).
   std::filesystem::path base_dir;  // Folder relative icon paths resolve from.

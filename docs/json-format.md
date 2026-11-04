@@ -56,6 +56,7 @@ unknown key is an error, which catches typos like `"descripton"`.
 | `platform`   | string  | `"custom"` | `custom`, `xbox360`, `ps3` or `retroachievements`. Picks the default popup style and how `platform_id` is read. |
 | `category`   | string  | `""`    | Category for achievements that don't set their own. |
 | `points_cap` | integer | `0`     | If the points add up to more than this they are scaled to exactly this total (see [Points cap](#points-cap)). `0`: no cap. |
+| `enabled`    | boolean | `true`  | Whether the set counts until the player turns it on or off in the settings (see [Sets that are off](#sets-that-are-off)). `false` suits optional packs, such as achievements that need servers that are gone. |
 | `credits`    | array   | `[]`    | [Credits](#credits) for the whole set. |
 | `source`     | object  | `{}`    | Free-form provenance: game id, URL, export date, tool. |
 
@@ -168,8 +169,9 @@ format, which is still read as before:
 
 - The set id is `category`, else `name`, else the folder name, so keys
   (`"Sample Achievement Mod:sample_speed"`) match existing saves. A pack with
-  `"enabled": false` or no achievements is skipped. `achievements.json` may
-  also be a bare array.
+  `"enabled": false` or no achievements is skipped: in this old format
+  `enabled` means "don't load", unlike `set.enabled` in the native format.
+  `achievements.json` may also be a bare array.
 - The achievement id is `id` (string or number), else `name`.
 - Old names map to the new fields: `gamerscore` → `points` (at most 500 each,
   and the pack is capped at 1000), `is_secret` → `secret`, `unachieved_desc` →
@@ -203,3 +205,34 @@ Progress is saved per profile as `<dir>/<profile>_achievements.json`:
 `completed_tricks` and `best_stat` from older saves are read as `completed`
 and `best_value`. Entries for sets that aren't loaded are kept, entries with
 no progress are left out, and fields the SDK doesn't know are preserved.
+
+## Sets that are off
+
+The player can turn each set on and off (`System::SetSetEnabled`, or the settings page of the viewers).
+A set that's off can't unlock or move forward: `Unlock()` returns false and triggers skip it, so no popup
+can come from it. It is left out of `Snapshot()`, `GetTotals()`, `enabled_sets()` and the viewers' tabs and
+totals, and its saved progress stays in the save file, so turning it back on brings everything back. Any
+number of sets can be on. `"set": {"enabled": false}` makes a set start off until the player turns it on.
+
+## Settings file
+
+The player's choices for the game (not per profile) are saved as `<storage dir>/achievement_settings.json`,
+or wherever `System::SetSettingsPath()` points; with no storage they are kept in memory. It is written the
+same way as saves (to a `.tmp` file, then renamed):
+
+```json
+{
+  "schema": "recomp-achievements-settings/1",
+  "sets": {
+    "my_game_online": { "enabled": true }
+  },
+  "settings": {
+    "popup_sound": { "enabled": true, "volume": 0.7 }
+  }
+}
+```
+
+`sets` holds only choices the player made (other sets use their `enabled`), including ones for sets that
+aren't loaded. `settings` is free-form for the UI layer (`System::GetSetting` / `SetSetting`);
+`popup_sound` is the popup sound switch and volume (`ui::GetPopupSoundSettings`). Unknown fields are kept,
+and an unreadable file is copied to `achievement_settings.json.corrupt` before it is replaced.

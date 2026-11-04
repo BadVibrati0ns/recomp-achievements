@@ -22,7 +22,16 @@ PopupUi::PopupUi(System& system, PopupUiOptions options)
   for (const auto& dir : options_.sound_dirs) sound_.bank().AddOverrideDir(dir);
   if (!global_dir.empty()) sound_.bank().AddOverrideDir(global_dir / "sounds");
   if (!options_.user_dir.empty()) sound_.bank().AddOverrideDir(options_.user_dir / "sounds");
-  if (options_.sounds) sound_.Attach(center_);
+  if (options_.sounds) {
+    // The player's popup sound choice (the settings views) over the style's volume.
+    center_.SetSoundHandler([this](const NotificationCenter::SoundRequest& r) {
+      const float gain = PopupSoundGain(GetPopupSoundSettings(system_), r.volume);
+      if (gain <= 0.0f) return;
+      NotificationCenter::SoundRequest scaled = r;
+      scaled.volume = gain;
+      sound_.Play(scaled);
+    });
+  }
 
   icons_.SetTextureCallbacks(options_.create_texture, options_.destroy_texture);
   icons_.SetFallbackIcon(options_.fallback_icon);

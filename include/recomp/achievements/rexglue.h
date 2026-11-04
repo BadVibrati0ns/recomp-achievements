@@ -32,6 +32,15 @@ namespace recomp::achievements {
 
 class System;
 
+// Title achievements to move out of the title's set into a set of their own
+// (SplitSet), e.g. online-only ones into a pack that starts off.
+struct RexglueSplitSet {
+  std::string set_id;
+  std::string title;
+  std::vector<uint32_t> ids;  // XDBF achievement ids.
+  bool enabled_by_default = false;
+};
+
 struct RexglueOptions {
   // XLanguage for names; 0 = rexglue's user_language cvar.
   uint32_t language = 0;
@@ -46,6 +55,9 @@ struct RexglueOptions {
   std::vector<std::filesystem::path> content_roots;
   std::string category;  // Default category for the built set.
   std::string title;     // Overrides the XDBF title name.
+  // Sets split off the built set before it is added. xam() looks ids up in
+  // them too, so the game's writes still land.
+  std::vector<RexglueSplitSet> split_sets;
 
   // Game opened the dashboard achievement list.
   std::function<void(uint32_t user_index, uint32_t title_id)> on_show_achievements;

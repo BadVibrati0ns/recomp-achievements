@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace recomp::achievements {
 class System;
@@ -39,9 +40,17 @@ class XamAchievements {
   // XDBF achievement id (its platform_id).
   XamAchievements(System& system, std::string set_id);
 
+  // Another set to look ids up in after the first, for achievements split
+  // off the title's set (SplitSet). An achievement of a set that's turned off
+  // is known but doesn't unlock, and reads as locked.
+  void AddSetId(std::string set_id);
+  // The set that has this achievement id; empty when none does.
+  std::string SetFor(uint32_t achievement_id) const;
+
   // XGIUserWriteAchievements: `entries` points at `count` guest
   // XUSER_ACHIEVEMENT structs. Every user index unlocks the one local
-  // profile. Returns how many were newly unlocked.
+  // profile. Returns how many were newly unlocked. Only ids no set has go to
+  // the unknown handler.
   uint32_t WriteAchievements(const uint8_t* entries, uint32_t count);
   // Same, from the XGI message buffer; `translate` turns a guest address
   // into a host pointer (null when unmapped).
@@ -62,10 +71,12 @@ class XamAchievements {
   void SetUnknownHandler(UnknownHandler handler) { on_unknown_ = std::move(handler); }
   void SetShowHandler(ShowHandler handler) { on_show_ = std::move(handler); }
   const std::string& set_id() const { return set_id_; }
+  const std::vector<std::string>& extra_set_ids() const { return extra_set_ids_; }
 
  private:
   System& system_;
   std::string set_id_;
+  std::vector<std::string> extra_set_ids_;
   UnknownHandler on_unknown_;
   ShowHandler on_show_;
 };

@@ -574,7 +574,7 @@ bool ParseNativeSet(const json& doc, const fs::path& origin, AchievementSet& out
     const auto set_it = doc.find("set");
     const json& s = set_it == doc.end() || set_it->is_null() ? empty : *set_it;
     r.ExpectObject(s, "set");
-    r.CheckKeys(s, "set", {"id", "title", "platform", "category", "points_cap", "credits", "source"});
+    r.CheckKeys(s, "set", {"id", "title", "platform", "category", "points_cap", "enabled", "credits", "source"});
     set.id = r.String(s, "id", "set").value_or(DefaultSetId(origin));
     if (set.id.empty()) r.Fail("set.id", "must not be empty");
     set.title = r.String(s, "title", "set").value_or(set.id);
@@ -587,6 +587,7 @@ bool ParseNativeSet(const json& doc, const fs::path& origin, AchievementSet& out
     }
     set.category = r.String(s, "category", "set").value_or("");
     set.points_cap = r.U32(s, "points_cap", "set").value_or(0);
+    set.enabled_by_default = r.Bool(s, "enabled", "set").value_or(true);
     set.credits = r.Credits(s, "set");
     if (const auto src = s.find("source"); src != s.end() && !src->is_null()) {
       r.ExpectObject(*src, "set.source");
@@ -621,6 +622,7 @@ json NativeSetToJson(const AchievementSet& set) {
   if (set.platform != Platform::kCustom) s["platform"] = PlatformName(set.platform);
   if (!set.category.empty()) s["category"] = set.category;
   if (set.points_cap) s["points_cap"] = set.points_cap;
+  if (!set.enabled_by_default) s["enabled"] = false;
   auto credits_json = [](const std::vector<Credit>& credits) {
     json out = json::array();
     for (const auto& c : credits) {

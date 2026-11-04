@@ -89,9 +89,17 @@ bool LoadInto(RexglueBinding::State& s) {
   s.title_id = loaded.title_id;
   if (s.options.add_set && s.title.valid()) {
     AchievementSet set = s.title.ToAchievementSet(RexglueSetOptions(s.set_id, s.options));
+    std::vector<AchievementSet> splits;
+    for (const auto& split : s.options.split_sets)
+      splits.push_back(SplitSet(set, split.ids, split.set_id, split.title, split.enabled_by_default));
     REXLOG_INFO("recomp-achievements: {} achievements for {:08X} as set '{}'",
                 set.achievements.size(), s.title_id, s.set_id);
     s.system->AddSet(std::move(set));
+    for (auto& split : splits) {
+      REXLOG_INFO("recomp-achievements: {} achievements split off as set '{}'", split.achievements.size(),
+                  split.id);
+      s.system->AddSet(std::move(split));
+    }
   }
   return s.title.valid();
 }
@@ -191,6 +199,8 @@ std::unique_ptr<RexglueBinding> BindRexglue(rex::system::KernelState* kernel_sta
   state->set_id = std::move(set_id);
   state->options = std::move(options);
   state->xam = std::make_unique<xbox::XamAchievements>(system, state->set_id);
+  // Also with add_set off: the game's own sets may use the same ids.
+  for (const auto& split : state->options.split_sets) state->xam->AddSetId(split.set_id);
   state->xam->SetUnknownHandler([](uint32_t, uint32_t id) {
     REXLOG_WARN("recomp-achievements: game wrote unknown achievement {}", id);
   });

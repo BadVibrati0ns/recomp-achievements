@@ -41,6 +41,7 @@ struct SetEntry {
   // replaced before they are delivered.
   std::shared_ptr<const AchievementSet> set;
   std::vector<Progress> progress;
+  bool enabled = true;  // The player's choice, else the set's default.
 };
 
 struct Loc {
@@ -90,6 +91,59 @@ std::string FileSafe(std::string_view profile) {
   return out;
 }
 
+// Write-then-rename so a crash mid-save can't leave a truncated file.
+void WriteJsonAtomic(const fs::path& path, const json& doc) {
+  fs::path tmp = path;
+  tmp += ".tmp";
+  std::error_code ec;
+  if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+    out << doc.dump(2) << '\n';
+    if (!out.good()) return;
+  }
+  fs::rename(tmp, path, ec);
+  if (ec) {
+    fs::remove(tmp, ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << doc.dump(2) << '\n';
+  }
+}
+
+// Reads a JSON object; an unreadable file is kept as <file>.corrupt before
+// the next save replaces it. Null when missing or unreadable.
+json ReadJsonObject(const fs::path& path) {
+  std::error_code ec;
+  if (path.empty() || !fs::exists(path, ec)) return nullptr;
+  std::ifstream in(path, std::ios::binary);
+  json doc = json::parse(in, nullptr, /*allow_exceptions=*/false);
+  in.close();
+  if (doc.is_object()) return doc;
+  fs::copy_file(path, fs::path(path) += ".corrupt", fs::copy_options::overwrite_existing, ec);
+  return nullptr;
+}
+
+constexpr std::string_view kSettingsFile = "achievement_settings.json";
+constexpr std::string_view kSettingsSchema = "recomp-achievements-settings/1";
+
+// The id AddSet() will give a set.
+std::string EffectiveSetId(const AchievementSet& set) {
+  if (!set.id.empty()) return set.id;
+  std::string id = NormalizeName(set.title);
+  return id.empty() ? std::string("default") : id;
+}
+
+// The local id AddSet() will give the achievement at `index`.
+std::string EffectiveLocalId(const AchievementSet& set, const std::string& set_id, size_t index) {
+  const Achievement& a = set.achievements[index];
+  if (!a.local_id.empty()) return a.local_id;
+  const std::string prefix = set_id + ":";
+  if (!a.key.empty()) return a.key.rfind(prefix, 0) == 0 ? a.key.substr(prefix.size()) : a.key;
+  const bool has_id = a.platform_id != 0 || set.platform == Platform::kPlayStation3;
+  return std::to_string(has_id ? a.platform_id : static_cast<uint32_t>(index));
+}
+
 }  // namespace
 
 struct System::Impl {
@@ -108,6 +162,10 @@ struct System::Impl {
   uint64_t generation = 0;
   // Progress bar totals from RecordValue(key, value, total); never saved.
   std::unordered_map<std::string, uint32_t> bar_totals;
+  // achievement_settings.json: {"sets": {id: {"enabled": b}}, "settings": {...}}.
+  // Entries for sets that aren't loaded and unknown fields are kept.
+  fs::path settings_override;
+  json settings = json::object();
 
   std::unordered_map<std::string, std::set<std::string>> aliases;  // Normalised.
   NameMatcher matcher;
@@ -281,6 +339,41 @@ struct System::Impl {
     out.keep_alive.push_back(loc.entry->set);
   }
 
+  // ---- Settings (lock held) --------------------------------------------
+
+  fs::path SettingsPath() const {
+    if (!settings_override.empty()) return settings_override;
+    return dir.empty() ? fs::path() : dir / kSettingsFile;
+  }
+
+  std::optional<bool> Choice(std::string_view set_id) const {
+    const auto sets_it = settings.find("sets");
+    if (sets_it == settings.end() || !sets_it->is_object()) return std::nullopt;
+    const auto it = sets_it->find(std::string(set_id));
+    if (it == sets_it->end() || !it->is_object()) return std::nullopt;
+    const auto e = it->find("enabled");
+    if (e == it->end() || !e->is_boolean()) return std::nullopt;
+    return e->get<bool>();
+  }
+
+  bool EnabledFor(const AchievementSet& set) const { return Choice(set.id).value_or(set.enabled_by_default); }
+
+  void ApplyChoices() {
+    for (auto& entry : sets) entry->enabled = EnabledFor(*entry->set);
+  }
+
+  void LoadSettings() {
+    json doc = ReadJsonObject(SettingsPath());
+    if (doc.is_object()) settings = std::move(doc);
+    ApplyChoices();
+  }
+
+  void SaveSettings() {
+    if (!settings.contains("schema")) settings["schema"] = kSettingsSchema;
+    const fs::path path = SettingsPath();
+    if (!path.empty()) WriteJsonAtomic(path, settings);
+  }
+
   // ---- Saves (lock held) -----------------------------------------------
 
   fs::path SavePath() const {
@@ -304,20 +397,9 @@ struct System::Impl {
       if (const auto it = memory_saves.find(profile); it != memory_saves.end()) stored = it->second;
       return;
     }
-    const fs::path path = SavePath();
-    std::error_code ec;
-    if (!fs::exists(path, ec)) return;
-    std::ifstream in(path, std::ios::binary);
-    json doc = json::parse(in, nullptr, /*allow_exceptions=*/false);
-    in.close();
-    if (doc.is_object()) {
-      if (const auto it = doc.find("achievements"); it != doc.end() && it->is_object()) {
-        stored = std::move(*it);
-      }
-      return;
-    }
-    // Unreadable: keep a copy before the next save replaces it.
-    fs::copy_file(path, fs::path(path) += ".corrupt", fs::copy_options::overwrite_existing, ec);
+    json doc = ReadJsonObject(SavePath());
+    if (!doc.is_object()) return;
+    if (const auto it = doc.find("achievements"); it != doc.end() && it->is_object()) stored = std::move(*it);
   }
 
   const json* StoredEntry(const Achievement& a) const {
@@ -366,25 +448,7 @@ struct System::Impl {
       memory_saves[profile] = stored;
       return;
     }
-    const json root = {{"profile", profile}, {"achievements", stored}};
-    const fs::path path = SavePath();
-    fs::path tmp = path;
-    tmp += ".tmp";
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    {
-      std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-      if (!out) return;
-      out << root.dump(2) << '\n';
-      if (!out.good()) return;
-    }
-    // Write-then-rename so a crash mid-save can't leave a truncated file.
-    fs::rename(tmp, path, ec);
-    if (ec) {
-      fs::remove(tmp, ec);
-      std::ofstream out(path, std::ios::binary | std::ios::trunc);
-      out << root.dump(2) << '\n';
-    }
+    WriteJsonAtomic(SavePath(), json{{"profile", profile}, {"achievements", stored}});
   }
 
   void SwitchProfile(std::string next) {
@@ -487,9 +551,11 @@ struct System::Impl {
     return false;
   }
 
+  // Locked achievements of the sets that are on.
   template <typename Fn>
   void ForEachLocked(Fn&& fn) const {
     for (const auto& entry : sets) {
+      if (!entry->enabled) continue;
       for (size_t i = 0; i < entry->set->achievements.size(); ++i) {
         if (!entry->progress[i].unlocked) fn(Loc{entry.get(), i});
       }
@@ -579,6 +645,7 @@ void System::AddSet(AchievementSet set) {
     entry = impl_->sets.back().get();
     entry->set = std::move(shared);
   }
+  entry->enabled = impl_->EnabledFor(*entry->set);
   impl_->RebuildIndex();
   impl_->ApplyStored(*entry);
   ++impl_->generation;
@@ -681,6 +748,74 @@ std::vector<const AchievementSet*> System::sets() const {
   return out;
 }
 
+std::vector<const AchievementSet*> System::enabled_sets() const {
+  std::lock_guard lock(impl_->mutex);
+  std::vector<const AchievementSet*> out;
+  for (const auto& entry : impl_->sets)
+    if (entry->enabled) out.push_back(entry->set.get());
+  return out;
+}
+
+// ---- Turning sets on and off and settings -------------------------------------
+
+void System::SetSetEnabled(std::string_view set_id, bool enabled) {
+  std::lock_guard lock(impl_->mutex);
+  SetEntry* entry = impl_->FindEntry(set_id);
+  const bool same = impl_->Choice(set_id) == enabled && (!entry || entry->enabled == enabled);
+  if (same) return;
+  json& sets = impl_->settings["sets"];
+  if (!sets.is_object()) sets = json::object();
+  json& choice = sets[std::string(set_id)];
+  if (!choice.is_object()) choice = json::object();
+  choice["enabled"] = enabled;
+  if (entry) entry->enabled = enabled;
+  impl_->SaveSettings();
+  ++impl_->generation;
+}
+
+bool System::IsSetEnabled(std::string_view set_id) const {
+  std::lock_guard lock(impl_->mutex);
+  if (const SetEntry* entry = impl_->FindEntry(set_id)) return entry->enabled;
+  return impl_->Choice(set_id).value_or(true);
+}
+
+json System::GetSetting(std::string_view key) const {
+  std::lock_guard lock(impl_->mutex);
+  const auto it = impl_->settings.find("settings");
+  if (it == impl_->settings.end() || !it->is_object()) return nullptr;
+  const auto value = it->find(std::string(key));
+  return value == it->end() ? json(nullptr) : *value;
+}
+
+void System::SetSetting(std::string_view key, json value) {
+  std::lock_guard lock(impl_->mutex);
+  json& all = impl_->settings["settings"];
+  if (!all.is_object()) all = json::object();
+  const std::string k(key);
+  const auto it = all.find(k);
+  if (value.is_null()) {
+    if (it == all.end()) return;
+    all.erase(it);
+  } else {
+    if (it != all.end() && *it == value) return;
+    all[k] = std::move(value);
+  }
+  impl_->SaveSettings();
+  ++impl_->generation;
+}
+
+void System::SetSettingsPath(fs::path path) {
+  std::lock_guard lock(impl_->mutex);
+  impl_->settings_override = std::move(path);
+  impl_->LoadSettings();
+  ++impl_->generation;
+}
+
+fs::path System::settings_path() const {
+  std::lock_guard lock(impl_->mutex);
+  return impl_->SettingsPath();
+}
+
 // ---- Saves -------------------------------------------------------------------
 
 void System::SetStorage(fs::path dir, ProfileProvider profile) {
@@ -691,6 +826,7 @@ void System::SetStorage(fs::path dir, ProfileProvider profile) {
   impl_->profile = impl_->provider ? impl_->QueryProfile() : std::string("default");
   impl_->LoadStored();
   impl_->ApplyStoredAll();
+  if (impl_->settings_override.empty()) impl_->LoadSettings();
   impl_->dirty = false;
   ++impl_->generation;
 }
@@ -726,7 +862,7 @@ bool System::Unlock(std::string_view key) {
   {
     std::lock_guard lock(impl_->mutex);
     impl_->SyncProfile();
-    if (const auto loc = impl_->Lookup(key)) {
+    if (const auto loc = impl_->Lookup(key); loc && loc->entry->enabled) {
       unlocked = impl_->MarkUnlocked(*loc, out);
       if (unlocked) impl_->Save();
     }
@@ -786,6 +922,23 @@ void System::Reset(const std::vector<std::string>& keys) {
       impl_->bar_totals.erase(loc->achievement().key);
     } else {
       impl_->stored.erase(key);
+    }
+  }
+  impl_->Save();
+  ++impl_->generation;
+}
+
+void System::ResetSet(std::string_view set_id) {
+  std::lock_guard lock(impl_->mutex);
+  if (SetEntry* entry = impl_->FindEntry(set_id)) {
+    std::fill(entry->progress.begin(), entry->progress.end(), Progress{});
+    for (const auto& a : entry->set->achievements) impl_->bar_totals.erase(a.key);
+  } else {
+    // Not loaded: drop its saved entries by their key prefix.
+    const std::string prefix = std::string(set_id) + ":";
+    for (auto it = impl_->stored.begin(); it != impl_->stored.end();) {
+      if (it.key().rfind(prefix, 0) == 0) it = impl_->stored.erase(it);
+      else ++it;
     }
   }
   impl_->Save();
@@ -871,7 +1024,7 @@ bool System::CompleteItem(std::string_view key, std::string_view item) {
   {
     std::lock_guard lock(impl_->mutex);
     impl_->SyncProfile();
-    if (const auto loc = impl_->Lookup(key); loc && !loc->progress().unlocked) {
+    if (const auto loc = impl_->Lookup(key); loc && loc->entry->enabled && !loc->progress().unlocked) {
       added = impl_->AddItems(*loc, impl_->NewItems(*loc, item), &out);
       if (added) impl_->Save();
     }
@@ -883,7 +1036,7 @@ bool System::CompleteItem(std::string_view key, std::string_view item) {
 void System::RecordValue(std::string_view key, double value) {
   std::lock_guard lock(impl_->mutex);
   const auto loc = impl_->Lookup(key);
-  if (!loc || loc->progress().unlocked || !(value > loc->progress().best_value)) return;
+  if (!loc || !loc->entry->enabled || loc->progress().unlocked || !(value > loc->progress().best_value)) return;
   loc->progress().best_value = value;
   impl_->dirty = true;
 }
@@ -924,10 +1077,11 @@ bool System::HasPending(std::string_view type) const {
 
 // ---- UI ----------------------------------------------------------------------------
 
-std::vector<AchievementView> System::Snapshot() const {
+std::vector<AchievementView> System::Snapshot(bool include_disabled) const {
   std::lock_guard lock(impl_->mutex);
   std::vector<AchievementView> out;
   for (const auto& entry : impl_->sets) {
+    if (!entry->enabled && !include_disabled) continue;
     for (const size_t i : Impl::DisplayOrder(*entry->set)) out.push_back(impl_->View(*entry, i));
   }
   return out;
@@ -937,7 +1091,7 @@ System::Totals System::GetTotals(std::string_view set_id) const {
   std::lock_guard lock(impl_->mutex);
   Totals totals;
   for (const auto& entry : impl_->sets) {
-    if (!set_id.empty() && entry->set->id != set_id) continue;
+    if (set_id.empty() ? !entry->enabled : entry->set->id != set_id) continue;
     for (size_t i = 0; i < entry->set->achievements.size(); ++i) {
       const uint32_t points = entry->set->achievements[i].points;
       ++totals.count;
@@ -958,10 +1112,13 @@ void System::TestPopup(std::string_view key) {
     std::optional<Loc> loc;
     if (!key.empty()) {
       loc = impl_->Lookup(key);
+      // A set that's off shows no popups, not even test ones.
+      if (loc && !loc->entry->enabled) loc.reset();
     } else {
       // Same order as Snapshot(): first locked, else the very first.
       std::optional<Loc> first;
       for (const auto& entry : impl_->sets) {
+        if (!entry->enabled) continue;
         for (const size_t i : Impl::DisplayOrder(*entry->set)) {
           if (!first) first = Loc{entry.get(), i};
           if (!entry->progress[i].unlocked) {
@@ -996,6 +1153,41 @@ void System::RemoveListener(int id) {
   std::lock_guard lock(impl_->mutex);
   std::erase_if(impl_->unlock_listeners, [id](const auto& l) { return l.first == id; });
   std::erase_if(impl_->progress_listeners, [id](const auto& l) { return l.first == id; });
+}
+
+AchievementSet SplitSet(AchievementSet& from, std::span<const uint32_t> platform_ids, std::string new_id,
+                        std::string title, bool enabled_by_default) {
+  const std::string from_id = EffectiveSetId(from);
+  AchievementSet out;
+  out.id = std::move(new_id);
+  out.title = title.empty() ? out.id : std::move(title);
+  out.platform = from.platform;
+  out.category = from.category;
+  out.credits = from.credits;
+  out.source = from.source;
+  out.base_dir = from.base_dir;
+  out.enabled_by_default = enabled_by_default;
+  // Pin every local id first: ids taken from the position would shift once
+  // achievements are moved out.
+  for (size_t i = 0; i < from.achievements.size(); ++i) {
+    from.achievements[i].local_id = EffectiveLocalId(from, from_id, i);
+    from.achievements[i].key.clear();
+  }
+  std::vector<Achievement> kept;
+  for (auto& a : from.achievements) {
+    const bool move = std::find(platform_ids.begin(), platform_ids.end(), a.platform_id) != platform_ids.end();
+    if (!move) {
+      kept.push_back(std::move(a));
+      continue;
+    }
+    const std::string old_key = from_id + ":" + a.local_id;
+    if (std::find(a.legacy_keys.begin(), a.legacy_keys.end(), old_key) == a.legacy_keys.end())
+      a.legacy_keys.insert(a.legacy_keys.begin(), old_key);
+    a.set_id.clear();
+    out.achievements.push_back(std::move(a));
+  }
+  from.achievements = std::move(kept);
+  return out;
 }
 
 }  // namespace recomp::achievements

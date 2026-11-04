@@ -66,8 +66,9 @@ BlendOverFrame();
 For a game with its own input bits, `GameInput()` returns the filtered `OverlayInput`, which the game turns
 back into its own bits (`ui::PadButtons()` gives the pad as a mask).
 
-Games that open the list from their own menu (or from `XamShowAchievementsUI`) call `Open()`;
-`Close()`, `Toggle()` and `is_open()` do the rest. `PCM` is 48 kHz stereo float (`ui::Pcm`).
+Games that open the list from their own menu (or from `XamShowAchievementsUI`) call `Open()`, or
+`OpenSettings()` for an "Achievement settings" menu entry; `Close()`, `Toggle()` and `is_open()` do the
+rest. `PCM` is 48 kHz stereo float (`ui::Pcm`).
 
 ## What the game sees
 
@@ -134,6 +135,7 @@ in `achievements_style.json` (see [styling.md](styling.md#viewer-keys-viewer)).
 | Show secrets | Y (triangle) | Space | click |
 | Details (checklist, credits, full text) | A (cross) | Enter | click a row |
 | Credits | Back / Select | F1 | |
+| Settings | Start / Options | F2 | click Settings beside the title |
 | Close / back | B (circle) | Esc, Backspace | click outside |
 
 The footer shows hints for the device used last (keyboard or controller), with Xbox labels unless the
@@ -153,6 +155,35 @@ locked description until "Show secrets" is on, the same rules as the ImGui list.
 Popups keep playing **over** the open viewer, so an unlock while browsing shows up and its row updates.
 With `popups_over_viewer = false` they wait (the center isn't advanced) until the viewer closes.
 
+## Settings page
+
+Start (Options on PlayStation), F2 or the Settings button beside the title opens the settings; B goes back
+to the list. Everything is saved through the `System` ([settings file](json-format.md#settings-file)), so a
+game passes nothing but its storage folder. Three sections, each a list of rows:
+
+- **Popup sound**: a switch, and the volume in 10% steps with left / right (or a click on the track). Each
+  change plays the progress sound at the new level. The overlay applies both to every popup: nothing reaches
+  `play_sound` / `sound_handler` while sound is off, and the volume they get already includes the player's.
+  Games that play popup sounds another way read `ui::GetPopupSoundSettings(system)` (`sounds.h`) or
+  multiply with `ui::PopupSoundGain()`.
+- **Achievement sets**: one row per set, with its unlock count and points, and a switch (A, or left for off
+  and right for on). Sets that are off stay listed here; they leave the set tabs, "All" and the header
+  totals, can't unlock (so no popups come from them), and keep their progress for when they're back on.
+- **Reset progress**: "Reset chosen achievements…" opens the list in reset mode, where holding A (Enter, or
+  the mouse button) on an achievement resets it and B returns here. Below it, one row per set (when there are
+  several) and "Reset all progress". Every reset is **held** for `reset_hold_seconds` (1.2 s) while a red bar
+  fills the row; letting go or moving away cancels it, a single press never resets anything, and the button
+  has to be released before another reset can start.
+
+Footer hints follow the selected row (Turn on / Turn off, Volume, Choose, Hold to reset) and the device in
+use, with Xbox or PlayStation labels as elsewhere. LB and RB do nothing on the settings page, so the first
+half of the Start + LB chord can't change a setting on the way out.
+
+`show_settings = false` hides the page (and its button and hints). A game that already offers some of these
+in its own menus hides just those sections with `settings_sound`, `settings_sets` or `settings_reset`, and
+can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()` and
+`ui::SetPopupSoundSettings()`.
+
 ## Options
 
 | `OverlayOptions` | Default | Meaning |
@@ -162,12 +193,15 @@ With `popups_over_viewer = false` they wait (the center isn't advanced) until th
 | `fallback_icon` | empty | Icon for achievements without one (usually the game's desktop icon). |
 | `center`, `styles`, `icons` | null | Borrow the game's own instead of making new ones. A borrowed center isn't attached or given sounds; a borrowed `IconCache` must hand out CPU images (`ui::UseImageTextures(cache)`). |
 | `advance_center` | true | `Frame()` advances the popups. |
-| `play_sound` | null | Gets each popup's PCM (override WAVs applied) to mix yourself. |
-| `sound_handler` | null | Gets the raw `SoundRequest`s instead. |
+| `play_sound` | null | Gets each popup's PCM (override WAVs applied) to mix yourself, at the volume to play it (the player's setting included). Not called while popup sound is off. |
+| `sound_handler` | null | Gets the raw `SoundRequest`s instead, with the player's volume applied. |
 | `toggle_key`, `toggle_pad` | `"F8"`, `"start+lb"` | Bindings (the player's `viewer` style wins). |
 | `buttons` | `kXbox` | Hint labels. |
 | `popups_over_viewer` | true | See above. |
 | `allow_reveal_secrets`, `show_credits` | true, true | |
+| `show_settings` | true | The settings page. |
+| `settings_sound`, `settings_sets`, `settings_reset` | true, true, true | Its sections. |
+| `reset_hold_seconds` | 1.2 | How long a reset is held. |
 | `title` | `"Achievements"` | Panel title. |
 | `font`, `font_bold` | empty | TTF/OTF bytes; empty uses the bundled DejaVu Sans. A regular font with no bold one is thickened for bold text. Code points a game font lacks fall back to DejaVu. |
 | `premultiplied` | false | `image()` in premultiplied alpha (blend `src + dst * (1 - a)`). |

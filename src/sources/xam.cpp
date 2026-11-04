@@ -27,6 +27,20 @@ uint64_t UnixToFileTime(uint64_t unix_seconds) {
 XamAchievements::XamAchievements(System& system, std::string set_id)
     : system_(system), set_id_(std::move(set_id)) {}
 
+void XamAchievements::AddSetId(std::string set_id) {
+  if (set_id == set_id_) return;
+  for (const auto& id : extra_set_ids_)
+    if (id == set_id) return;
+  extra_set_ids_.push_back(std::move(set_id));
+}
+
+std::string XamAchievements::SetFor(uint32_t achievement_id) const {
+  if (system_.FindByPlatformId(set_id_, achievement_id)) return set_id_;
+  for (const auto& id : extra_set_ids_)
+    if (system_.FindByPlatformId(id, achievement_id)) return id;
+  return {};
+}
+
 uint32_t XamAchievements::WriteAchievements(const uint8_t* entries, uint32_t count) {
   if (!entries) return 0;
   uint32_t unlocked = 0;
@@ -34,11 +48,13 @@ uint32_t XamAchievements::WriteAchievements(const uint8_t* entries, uint32_t cou
     const uint8_t* entry = entries + i * kUserAchievementSize;
     const uint32_t user_index = LoadBE32(entry);
     const uint32_t id = LoadBE32(entry + 4);
-    if (!system_.FindByPlatformId(set_id_, id)) {
+    const std::string set = SetFor(id);
+    if (set.empty()) {
       if (on_unknown_) on_unknown_(user_index, id);
       continue;
     }
-    unlocked += system_.Unlock(set_id_, id) ? 1 : 0;
+    // A set that's off refuses the unlock.
+    unlocked += system_.Unlock(set, id) ? 1 : 0;
   }
   return unlocked;
 }
@@ -58,7 +74,9 @@ uint32_t XamAchievements::ApplyUnlockState(uint8_t* details, uint32_t count) con
   for (uint32_t i = 0; i < count; ++i) {
     uint8_t* d = details + i * kAchievementDetailsSize;
     const uint32_t id = LoadBE32(d);
-    const Achievement* a = system_.FindByPlatformId(set_id_, id);
+    const std::string set = SetFor(id);
+    if (set.empty() || !system_.IsSetEnabled(set)) continue;
+    const Achievement* a = system_.FindByPlatformId(set, id);
     if (!a) continue;
     const auto progress = system_.GetProgress(a->key);
     if (!progress || !progress->unlocked) continue;
@@ -73,7 +91,8 @@ uint32_t XamAchievements::ApplyUnlockState(uint8_t* details, uint32_t count) con
 }
 
 bool XamAchievements::IsUnlocked(uint32_t achievement_id) const {
-  return system_.IsUnlocked(set_id_, achievement_id);
+  const std::string set = SetFor(achievement_id);
+  return !set.empty() && system_.IsSetEnabled(set) && system_.IsUnlocked(set, achievement_id);
 }
 
 void XamAchievements::ShowAchievementsUI(uint32_t user_index, uint32_t title_id) const {

@@ -12,7 +12,8 @@ if(RECOMP_ACH_BUILD_TESTS)
       ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_main.cpp
       ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_json_format.cpp
       ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_compat.cpp
-      ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_system.cpp)
+      ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_system.cpp
+      ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_settings.cpp)
   # The format tests reach the private parser directly.
   target_include_directories(recomp_achievements_core_tests PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../src)
   target_link_libraries(recomp_achievements_core_tests PRIVATE recomp::achievements)

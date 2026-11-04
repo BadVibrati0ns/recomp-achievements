@@ -18,6 +18,12 @@ list of its own.
 - **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
   in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
+- **Player settings, in game:** the viewer's settings page turns each achievement set on and off (a set
+  that's off hides its points, can't unlock and keeps its progress; sets can start off), resets chosen
+  achievements, a set or everything behind a hold-to-confirm, and sets the popup sound and volume. The
+  choices are saved for the game in `achievement_settings.json` next to the saves, so a game only passes
+  its storage folder. `SplitSet()` moves achievements a recomp can't support (online-only ones) into an
+  optional set of their own.
 
 ## Parts
 
@@ -106,7 +112,7 @@ A minimal set file:
 - [JSON set format](docs/json-format.md) ([schema](schema/achievement-set.schema.json))
 - [Popup styles and sounds](docs/styling.md)
 - [Achievement overlay without ImGui](docs/overlay.md)
-- [Xbox 360 / rexglue](docs/xbox360.md)
+- [Xbox 360 / rexglue](docs/xbox360.md), including [splitting off unsupported achievements](docs/xbox360.md#splitting-off-achievements-the-recomp-cant-support)
 - [PS3 trophies](docs/ps3.md)
 - [RetroAchievements lists](docs/retroachievements.md) and the [import tool](tools/README.md)
 - [Memory triggers](docs/memory-triggers.md)
@@ -121,6 +127,10 @@ python3 -m unittest discover -s tools/tests
 ```
 
 Everything builds offline.
+
+ImGui games get the same player settings from `AchievementListWindow` (and `PopupUi::list()`): a Settings
+button with the popup sound switch and volume, a checkbox per set, and resets of chosen achievements, a set
+or everything, each behind a confirmation dialog. `PopupUi` applies the sound setting to its popups.
 
 Games without Dear ImGui link `recomp::achievements_ui_base` and use `ui::Overlay`: pass a few input
 states each frame, call `Frame()`, and when it returns true upload `image()` and blend it over the frame

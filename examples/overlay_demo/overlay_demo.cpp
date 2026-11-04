@@ -2,9 +2,14 @@
 // frame, without a GPU or Dear ImGui, and writes raw RGB24 frames to stdout
 // plus a WAV of the popup sounds:
 //
-//   overlay_demo audio.wav | ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i -
+//   overlay_demo audio.wav > video.rgb
+//   ffmpeg -f rawvideo -pix_fmt rgb24 -s 1280x720 -r 30 -i video.rgb
 //       -i audio.wav -c:v libx264 -pix_fmt yuv420p -c:a aac overlay.mp4
-//   (one command; overlay_demo audio.wav <width> <height> for another size)
+//   (the WAV is written last, so not as one pipe; overlay_demo audio.wav
+//   <width> <height> for another size)
+//
+// The script browses the list, then the settings page: volume, a set turned
+// off and on, a reset cancelled, and one achievement reset by holding A.
 //
 //   overlay_demo --bench    times list and popup frames at 1920x1080
 
@@ -310,6 +315,38 @@ int main(int argc, char** argv) {
       // LB first, then Start: closes without leaving the set changed.
       {27.0f, 0.6f, pad(&OverlayInput::pad_lb)},
       {27.25f, 0.4f, pad(&OverlayInput::pad_start)},
+
+      // Settings: Start on the open viewer.
+      {29.0f, 0.7f, pad(&OverlayInput::pad_start)},
+      {29.3f, 0.4f, pad(&OverlayInput::pad_lb)},
+      {30.6f, 0.1f, pad(&OverlayInput::pad_start)},
+      {31.8f, 0.1f, pad(&OverlayInput::pad_down)},   // Volume.
+      {32.6f, 0.1f, pad(&OverlayInput::pad_left)},   // 90%, with a preview tick.
+      {33.2f, 0.1f, pad(&OverlayInput::pad_left)},   // 80%.
+      {33.8f, 0.1f, [](OverlayInput& in) { in.left = true; }},  // 70%, from the keyboard.
+      {34.8f, 0.1f, pad(&OverlayInput::pad_down)},
+      {35.2f, 0.1f, pad(&OverlayInput::pad_down)},
+      {35.6f, 0.1f, pad(&OverlayInput::pad_down)},   // Community Pack.
+      {36.6f, 0.1f, pad(&OverlayInput::pad_a)},      // Off.
+      {38.2f, 0.1f, pad(&OverlayInput::pad_b)},      // The list: its tab and points are gone.
+      {39.6f, 0.1f, pad(&OverlayInput::pad_rb)},
+      {40.4f, 0.1f, pad(&OverlayInput::pad_lb)},
+      {41.4f, 0.1f, pad(&OverlayInput::pad_start)},
+      {42.4f, 0.1f, pad(&OverlayInput::pad_a)},      // On again, progress intact.
+      {43.4f, 0.1f, pad(&OverlayInput::pad_down)},   // Reset chosen achievements...
+      {43.8f, 0.1f, pad(&OverlayInput::pad_down)},
+      {44.2f, 0.1f, pad(&OverlayInput::pad_down)},
+      {44.6f, 0.1f, pad(&OverlayInput::pad_down)},   // Reset Community Pack.
+      {45.4f, 0.1f, pad(&OverlayInput::pad_a)},      // A tap does nothing...
+      {46.2f, 0.7f, pad(&OverlayInput::pad_a)},      // ...and letting go early cancels.
+      {47.6f, 0.1f, pad(&OverlayInput::pad_up)},
+      {48.0f, 0.1f, pad(&OverlayInput::pad_up)},
+      {48.4f, 0.1f, pad(&OverlayInput::pad_up)},
+      {49.2f, 0.1f, pad(&OverlayInput::pad_a)},      // Reset mode.
+      {50.2f, 1.6f, pad(&OverlayInput::pad_a)},      // Held to the end: Street Legend is reset.
+      {53.0f, 0.1f, pad(&OverlayInput::pad_b)},      // Back to the settings.
+      {54.2f, 0.1f, pad(&OverlayInput::pad_b)},
+      {55.0f, 0.1f, pad(&OverlayInput::pad_b)},
   };
   struct Event {
     float at;
@@ -321,8 +358,9 @@ int main(int argc, char** argv) {
       {4.4f, [&] { system.Unlock("mod_pack:manual"); }},
       {5.0f, [&] { system.Unlock("trophies:t2"); }},  // PS3 look, top right.
       {23.6f, [&] { system.Unlock("mod_pack:lost"); }},  // While the viewer is open.
+      {37.4f, [&] { system.Unlock("mod_pack:grind"); }},  // Its set is off: no popup, no unlock.
   };
-  const float seconds = 30.0f;
+  const float seconds = 56.5f;
   const int frames = static_cast<int>(seconds * kFps);
   std::vector<float> fb(static_cast<size_t>(w) * h * 3);
   std::vector<uint8_t> out(fb.size());

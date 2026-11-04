@@ -7,6 +7,7 @@
 #include <fstream>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "recomp/achievements/system.h"
 #include "recomp/achievements/ui/achievement_list.h"
 #include "recomp/achievements/ui/imgui_renderer.h"
@@ -245,6 +246,110 @@ TEST(imgui_list_window_and_popup_ui) {
   // Every filter and the secret toggle render without tripping ImGui asserts.
   AchievementListWindow list(system, &ui.icons());
   for (int f = 0; f < 3; ++f) Frame([&] { list.Draw(); });
+}
+
+namespace {
+
+// Moves the mouse over the window named `window` until the item with `id` is
+// hovered, then clicks it. ImGui has no item lookup by label, so this sweeps.
+bool Click(const std::function<void()>& body, ImGuiID id, const char* window = "w") {
+  ImGuiIO& io = ImGui::GetIO();
+  const ImGuiWindow* w = ImGui::FindWindowByName(window);
+  if (!w) return false;
+  const ImRect r = w->Rect();
+  for (float y = r.Min.y + 2; y < r.Max.y; y += 3) {
+    for (float x = r.Min.x + 12; x < std::min(r.Max.x, r.Min.x + 400); x += 24) {
+      io.AddMousePosEvent(x, y);
+      Frame(body);
+      if (GImGui->HoveredId != id) continue;
+      io.AddMouseButtonEvent(0, true);
+      Frame(body);
+      io.AddMouseButtonEvent(0, false);
+      Frame(body);
+      io.AddMousePosEvent(-1, -1);
+      Frame(body);
+      return true;
+    }
+  }
+  return false;
+}
+
+ImGuiID SettingsId(std::initializer_list<const char*> path) {
+  ImGuiID id = ImHashStr("w");  // The test window.
+  id = ImHashStr("recomp_ach_settings", 0, id);
+  for (const char* p : path) id = ImHashStr(p, 0, id);
+  return id;
+}
+
+constexpr const char* kModal = "Reset progress?##recomp_ach_reset";
+
+ImGuiID ModalId(const char* label) { return ImHashStr(label, 0, ImHashStr(kModal)); }
+
+}  // namespace
+
+TEST(imgui_settings_sets_sound_and_resets) {
+  Context ctx;
+  System system;
+  system.AddSet(MakeSet("x", Platform::kXbox360));
+  system.AddSet(MakeSet("p", Platform::kPlayStation3));
+  system.Unlock("x:a0");
+  system.Unlock("p:a1");
+  AchievementListWindow list(system);
+  const auto body = [&] {
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(900, 1000));
+    ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+    list.DrawSettings();
+    ImGui::End();
+  };
+  for (int f = 0; f < 3; ++f) Frame(body);
+
+  // A set's checkbox turns it off; the list and totals follow.
+  CHECK(Click(body, SettingsId({"p", "Set p"})));
+  CHECK(!system.IsSetEnabled("p"));
+  CHECK_EQ(system.GetTotals().count, 4u);
+  CHECK(Click(body, SettingsId({"p", "Set p"})));
+  CHECK(system.IsSetEnabled("p"));
+
+  // Sound off.
+  CHECK(Click(body, SettingsId({"Sound"})));
+  CHECK(!GetPopupSoundSettings(system).enabled);
+
+  // A reset asks first: one click only opens the confirmation.
+  CHECK(Click(body, SettingsId({"Reset all progress..."})));
+  CHECK(system.IsUnlocked("x:a0"));
+  CHECK(Click(body, ModalId("Cancel"), kModal));
+  CHECK(system.IsUnlocked("x:a0"));
+  // One set, confirmed.
+  CHECK(Click(body, SettingsId({"x", "Reset Set x..."})));
+  CHECK(system.IsUnlocked("x:a0"));
+  CHECK(Click(body, ModalId("Reset"), kModal));
+  CHECK(!system.IsUnlocked("x:a0"));
+  CHECK(system.IsUnlocked("p:a1"));
+  // Everything.
+  CHECK(Click(body, SettingsId({"Reset all progress..."})));
+  CHECK(Click(body, ModalId("Reset"), kModal));
+  CHECK(!system.IsUnlocked("p:a1"));
+
+  // Reset mode hands over to the list, with a Reset button per row.
+  system.Unlock("x:a1");
+  CHECK(Click(body, SettingsId({"Reset chosen achievements..."})));
+  CHECK(list.reset_mode());
+  const auto contents = [&] {
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(900, 1000));
+    ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove);
+    list.DrawContents();
+    ImGui::End();
+  };
+  for (int f = 0; f < 3; ++f) Frame(contents);
+  // Sets that are off leave the list window; with all off it says so.
+  system.SetSetEnabled("x", false);
+  system.SetSetEnabled("p", false);
+  for (int f = 0; f < 3; ++f) Frame(contents);
+  list.SetSettingsOpen(true);
+  for (int f = 0; f < 3; ++f) Frame(contents);
+  CHECK(list.settings_open());
 }
 
 #if RECOMP_ACH_HAS_SDL3

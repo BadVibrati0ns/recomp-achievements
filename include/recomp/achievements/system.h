@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -67,7 +68,33 @@ class System {
   const AchievementSet* FindSet(std::string_view set_id) const;
   const Achievement* Find(std::string_view key) const;
   const Achievement* FindByPlatformId(std::string_view set_id, uint32_t platform_id) const;
+  // Every loaded set, turned on or not, in load order.
   std::vector<const AchievementSet*> sets() const;
+  // Only the sets that are turned on.
+  std::vector<const AchievementSet*> enabled_sets() const;
+
+  // ---- Turning sets on and off -----------------------------------------
+  // A set that's off can't unlock or move forward (Unlock() returns false and
+  // triggers skip it), and is left out of Snapshot() and GetTotals(). Its
+  // saved progress stays and counts again once it's back on. The choice is
+  // the player's, for the game rather than per profile, and is saved in the
+  // settings file. Sets without a choice use enabled_by_default. Works for
+  // ids that aren't loaded yet.
+  void SetSetEnabled(std::string_view set_id, bool enabled);
+  bool IsSetEnabled(std::string_view set_id) const;
+
+  // ---- Settings --------------------------------------------------------
+  // Small player settings the UI keeps for this game (popup sound, ...),
+  // saved next to the per-set choices. Values are any JSON; a null value
+  // removes the key. GetSetting returns null for a missing key.
+  nlohmann::json GetSetting(std::string_view key) const;
+  void SetSetting(std::string_view key, nlohmann::json value);
+  // The settings file. Default: <storage dir>/achievement_settings.json, or
+  // in memory with no storage. Setting a path reads it (choices made before
+  // are kept if the file doesn't exist yet); an empty path goes back to the
+  // default.
+  void SetSettingsPath(std::filesystem::path path);
+  std::filesystem::path settings_path() const;
 
   // ---- Saves -------------------------------------------------------------
   // Progress is saved as <dir>/<profile>_achievements.json. The provider is
@@ -76,8 +103,9 @@ class System {
   void SetStorage(std::filesystem::path dir, ProfileProvider profile = nullptr);
   void ReloadProgress();
   std::string active_profile() const;
-  // Increases whenever sets are added, replaced, removed or cleared, progress
-  // is reset or reloaded, or the active profile changes. Compare with a
+  // Increases whenever sets are added, replaced, removed, cleared or turned
+  // on or off, progress is reset or reloaded, a setting changes, or the
+  // active profile changes. Compare with a
   // stored value to know when to re-read definitions and progress.
   uint64_t generation() const;
 
@@ -88,8 +116,11 @@ class System {
   bool IsUnlocked(std::string_view key) const;
   bool IsUnlocked(std::string_view set_id, uint32_t platform_id) const;
   std::optional<Progress> GetProgress(std::string_view key) const;
+  // Clears the active profile's progress: everything (sets that are off and
+  // sets that aren't loaded included), the given keys, or one set.
   void Reset();
   void Reset(const std::vector<std::string>& keys);
+  void ResetSet(std::string_view set_id);
 
   // ---- Built-in triggers -------------------------------------------------
   void ReportStat(std::string_view stat, double value);
@@ -114,14 +145,18 @@ class System {
   bool HasPending(std::string_view type) const;
 
   // ---- UI ----------------------------------------------------------------
-  // Every achievement, ordered by set (load order) then display_order.
-  std::vector<AchievementView> Snapshot() const;
+  // Every achievement of the sets that are on, ordered by set (load order)
+  // then display_order; include_disabled adds the sets that are off.
+  std::vector<AchievementView> Snapshot(bool include_disabled = false) const;
   struct Totals {
     uint32_t count = 0, unlocked = 0, points = 0, unlocked_points = 0;
   };
+  // Empty set_id: the sets that are on. A set id: that set, even when off
+  // (so a settings page can show what turning it on would bring back).
   Totals GetTotals(std::string_view set_id = {}) const;
   // Sends an unlock event with replay = true without saving anything. Empty
-  // key: the first locked achievement (or the first one if all are unlocked).
+  // key: the first locked achievement of a set that is on (or the first one
+  // if all are unlocked).
   void TestPopup(std::string_view key = {});
 
   int AddUnlockListener(UnlockListener listener);
@@ -132,6 +167,15 @@ class System {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
+
+// Moves the achievements of `from` with these platform ids into a new set,
+// before either is added, e.g. a title's online-only achievements into an
+// optional pack that starts off. The new set keeps from's platform, category,
+// credits and folder. Moved achievements keep their old key
+// ("<from id>:<local id>") as a legacy key, so saved progress still counts.
+// Ids from doesn't have are ignored.
+AchievementSet SplitSet(AchievementSet& from, std::span<const uint32_t> platform_ids, std::string new_id,
+                        std::string title, bool enabled_by_default = false);
 
 // The default NameMatcher's normalisation: lower-case letters and digits only.
 std::string NormalizeName(std::string_view name);

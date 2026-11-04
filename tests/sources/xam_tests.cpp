@@ -1,6 +1,7 @@
 #include <cstring>
 
 #include "recomp/achievements/sources/xam.h"
+#include "recomp/achievements/sources/xdbf.h"
 #include "recomp/achievements/system.h"
 #include "test_util.h"
 
@@ -117,4 +118,79 @@ TEST(XamShowHandler) {
   xam.SetShowHandler([&](uint32_t, uint32_t title_id) { seen = title_id; });
   xam.ShowAchievementsUI(0, 0x415607F0);
   CHECK_EQ(seen, 0x415607F0u);
+}
+
+namespace {
+
+// A title with online-only achievements 29, 30 and 48, from a synthetic XDBF.
+AchievementSet SyntheticTitle() {
+  test::XdbfBuilder b;
+  uint16_t sid = 100;
+  for (uint16_t id : {1, 2, 29, 30, 48}) {
+    b.achievements.push_back({id, sid, uint16_t(sid + 1), uint16_t(sid + 1), 0, 10, 0x9});
+    b.AddString(1, sid, "Achievement " + std::to_string(id));
+    b.AddString(1, uint16_t(sid + 1), "Do thing " + std::to_string(id));
+    sid = uint16_t(sid + 2);
+  }
+  b.AddString(1, 0x8000, "Synthetic Title");
+  const auto bytes = b.Build();
+  XdbfDatabase db;
+  CHECK(db.Load(std::span<const uint8_t>(bytes)));
+  XdbfTitle title;
+  title.SetBase(std::move(db));
+  XdbfSetOptions options;
+  options.set_id = "title";
+  return title.ToAchievementSet(options);
+}
+
+}  // namespace
+
+TEST(XamFindsSplitSets) {
+  System system;
+  AchievementSet title = SyntheticTitle();
+  CHECK_EQ(title.achievements.size(), size_t(5));
+  const std::vector<uint32_t> online_ids = {29, 30, 48};
+  AchievementSet online = SplitSet(title, online_ids, "title_online", "Online", false);
+  CHECK_EQ(title.achievements.size(), size_t(2));
+  CHECK_EQ(online.achievements.size(), size_t(3));
+  CHECK(online.platform == Platform::kXbox360);
+  system.AddSet(title);
+  system.AddSet(online);
+
+  XamAchievements xam(system, "title");
+  xam.AddSetId("title_online");
+  xam.AddSetId("title_online");  // Once is enough.
+  CHECK_EQ(xam.extra_set_ids().size(), size_t(1));
+  CHECK_EQ(xam.SetFor(1), std::string("title"));
+  CHECK_EQ(xam.SetFor(48), std::string("title_online"));
+  CHECK(xam.SetFor(7).empty());
+  std::vector<uint32_t> unknown;
+  xam.SetUnknownHandler([&](uint32_t, uint32_t id) { unknown.push_back(id); });
+
+  // The pack starts off: the game's write is known, but nothing unlocks.
+  std::vector<uint8_t> entries;
+  Put32(entries, 0); Put32(entries, 29);
+  Put32(entries, 0); Put32(entries, 1);
+  Put32(entries, 0); Put32(entries, 7);
+  CHECK_EQ(xam.WriteAchievements(entries.data(), 3), 1u);
+  CHECK_EQ(unknown, std::vector<uint32_t>{7});
+  CHECK(!system.IsUnlocked("title_online", 29));
+  CHECK(system.IsUnlocked("title", 1));
+
+  // Turned on: the same write unlocks it in the split set.
+  system.SetSetEnabled("title_online", true);
+  CHECK_EQ(xam.WriteAchievements(entries.data(), 3), 1u);
+  CHECK(system.IsUnlocked("title_online", 29));
+  CHECK(xam.IsUnlocked(29));
+  auto details = Details({1, 29, 30});
+  CHECK_EQ(xam.ApplyUnlockState(details.data(), 3), 2u);
+  CHECK_EQ(Get32(details.data() + kAchievementDetailsSize + 32), 0x8u | kAchievementFlagAchieved);
+
+  // Off again: kept, but the game reads it as locked.
+  system.SetSetEnabled("title_online", false);
+  CHECK(system.IsUnlocked("title_online", 29));
+  CHECK(!xam.IsUnlocked(29));
+  details = Details({1, 29});
+  CHECK_EQ(xam.ApplyUnlockState(details.data(), 2), 1u);
+  CHECK_EQ(Get32(details.data() + kAchievementDetailsSize + 32), 0x8u);
 }

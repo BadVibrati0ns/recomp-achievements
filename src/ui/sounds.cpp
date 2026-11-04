@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "recomp/achievements/system.h"
+
 namespace recomp::achievements::ui {
 
 namespace {
@@ -418,6 +420,26 @@ std::shared_ptr<const Pcm> SoundBank::ForEvent(NotificationKind kind, Tier tier,
     }
   }
   return Get(ref);
+}
+
+PopupSoundSettings GetPopupSoundSettings(const System& system) {
+  PopupSoundSettings out;
+  const nlohmann::json j = system.GetSetting(kPopupSoundSetting);
+  if (!j.is_object()) return out;
+  if (const auto it = j.find("enabled"); it != j.end() && it->is_boolean()) out.enabled = it->get<bool>();
+  if (const auto it = j.find("volume"); it != j.end() && it->is_number())
+    out.volume = std::clamp(it->get<float>(), 0.0f, 1.0f);
+  return out;
+}
+
+void SetPopupSoundSettings(System& system, const PopupSoundSettings& settings) {
+  // Two decimals: repeated 10% steps shouldn't save as 0.30000001.
+  const double volume = std::round(std::clamp(settings.volume, 0.0f, 1.0f) * 100.0) / 100.0;
+  system.SetSetting(kPopupSoundSetting, {{"enabled", settings.enabled}, {"volume", volume}});
+}
+
+float PopupSoundGain(const PopupSoundSettings& settings, float style_volume) {
+  return settings.enabled ? std::clamp(style_volume, 0.0f, 1.0f) * std::clamp(settings.volume, 0.0f, 1.0f) : 0.0f;
 }
 
 }  // namespace recomp::achievements::ui

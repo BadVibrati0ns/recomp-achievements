@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "recomp/achievements/ui/imgui_renderer.h"
+#include "recomp/achievements/ui/sounds.h"
 #include "recomp/achievements/ui/style.h"
 
 namespace recomp::achievements::ui {
@@ -75,9 +76,118 @@ void AchievementListWindow::Draw(bool* open) {
   ImGui::End();
 }
 
+void AchievementListWindow::DrawSettings() {
+  ImGui::PushID("recomp_ach_settings");
+  DrawSettingsBody();
+  DrawResetConfirmation();
+  ImGui::PopID();
+}
+
+void AchievementListWindow::AskReset(std::string label, std::vector<std::string> keys, std::string set_id, bool all) {
+  pending_ = {std::move(label), std::move(keys), std::move(set_id), all, true};
+}
+
+void AchievementListWindow::DrawResetConfirmation() {
+  const char* id = "Reset progress?##recomp_ach_reset";
+  if (pending_.open) {
+    ImGui::OpenPopup(id);
+    pending_.open = false;
+  }
+  if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  ImGui::Text("Reset %s?", pending_.label.c_str());
+  ImGui::TextDisabled("Unlocks and progress are cleared for this profile. This can't be undone.");
+  ImGui::Spacing();
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.20f, 0.17f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.26f, 0.22f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.30f, 0.25f, 1.0f));
+  const bool confirm = ImGui::Button("Reset", ImVec2(120, 0));
+  ImGui::PopStyleColor(3);
+  ImGui::SameLine();
+  // Focus starts on Cancel, so Enter alone never confirms.
+  if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+  const bool cancel = ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
+  if (confirm) {
+    if (pending_.all) system_.Reset();
+    else if (!pending_.set_id.empty()) system_.ResetSet(pending_.set_id);
+    else system_.Reset(pending_.keys);
+  }
+  if (confirm || cancel) {
+    pending_ = {};
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+void AchievementListWindow::DrawSettingsBody() {
+  if (options_.settings_sound) {
+    ImGui::SeparatorText("Popup sound");
+    PopupSoundSettings sound = GetPopupSoundSettings(system_);
+    if (ImGui::Checkbox("Sound", &sound.enabled)) SetPopupSoundSettings(system_, sound);
+    ImGui::BeginDisabled(!sound.enabled);
+    float percent = volume_edit_ >= 0.0f ? volume_edit_ : sound.volume * 100.0f;
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::SliderFloat("Volume", &percent, 0.0f, 100.0f, "%.0f%%")) volume_edit_ = percent;
+    // Saved on release, not on every step of a drag.
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      sound.volume = std::clamp(percent, 0.0f, 100.0f) / 100.0f;
+      SetPopupSoundSettings(system_, sound);
+      volume_edit_ = -1.0f;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Test")) system_.TestPopup();
+    ImGui::EndDisabled();
+  }
+
+  const auto all = system_.sets();
+  if (options_.settings_sets && !all.empty()) {
+    ImGui::SeparatorText("Achievement sets");
+    ImGui::TextDisabled("Sets that are off hide their points and can't unlock. Their progress is kept.");
+    for (const AchievementSet* set : all) {
+      ImGui::PushID(set->id.c_str());
+      bool on = system_.IsSetEnabled(set->id);
+      if (ImGui::Checkbox(set->title.empty() ? set->id.c_str() : set->title.c_str(), &on))
+        system_.SetSetEnabled(set->id, on);
+      const auto t = system_.GetTotals(set->id);
+      ImGui::SameLine();
+      if (t.points) ImGui::TextDisabled("%u / %u unlocked, %u / %u points", t.unlocked, t.count, t.unlocked_points, t.points);
+      else ImGui::TextDisabled("%u / %u unlocked", t.unlocked, t.count);
+      ImGui::PopID();
+    }
+  }
+
+  if (options_.settings_reset && !all.empty()) {
+    ImGui::SeparatorText("Reset progress");
+    if (ImGui::Button("Reset chosen achievements...")) {
+      reset_mode_ = true;
+      settings_open_ = false;
+    }
+    if (all.size() > 1) {
+      for (const AchievementSet* set : all) {
+        ImGui::PushID(set->id.c_str());
+        const std::string title = set->title.empty() ? set->id : set->title;
+        if (ImGui::Button(("Reset " + title + "...").c_str())) AskReset(title, {}, set->id, false);
+        ImGui::PopID();
+      }
+    }
+    if (ImGui::Button("Reset all progress...")) AskReset("all progress", {}, {}, true);
+  }
+}
+
 void AchievementListWindow::DrawContents() {
   const TierStyle tier_colors;
-  const auto sets = system_.sets();
+  ImGui::PushID("recomp_ach_list");
+  const bool has_settings =
+      options_.show_settings && (options_.settings_sound || options_.settings_sets || options_.settings_reset);
+  if (!has_settings) settings_open_ = false;
+  if (settings_open_) {
+    if (ImGui::Button("< Achievements")) settings_open_ = false;
+    DrawSettingsBody();
+    DrawResetConfirmation();
+    ImGui::PopID();
+    return;
+  }
+  // Sets that are off leave the list, the set picker and the totals.
+  const auto sets = system_.enabled_sets();
   if (!selected_set_.empty() &&
       std::none_of(sets.begin(), sets.end(), [&](const AchievementSet* s) { return s->id == selected_set_; }))
     selected_set_.clear();
@@ -114,6 +224,18 @@ void AchievementListWindow::DrawContents() {
     ImGui::SameLine();
     ImGui::Checkbox("Show secrets", &reveal_secrets_);
   }
+  if (has_settings) {
+    ImGui::SameLine();
+    if (ImGui::Button("Settings")) {
+      settings_open_ = true;
+      reset_mode_ = false;
+    }
+  }
+  if (reset_mode_) {
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "Reset mode: pick an achievement to reset.");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Done")) reset_mode_ = false;
+  }
 
   const auto totals = system_.GetTotals(selected_set_);
   ImGui::Text("%u / %u unlocked", totals.unlocked, totals.count);
@@ -130,6 +252,9 @@ void AchievementListWindow::DrawContents() {
   const std::string needle = Lower(search_);
   const auto views = system_.Snapshot();
   ImGui::BeginChild("##achievement_list");
+  if (sets.empty() && !system_.sets().empty())
+    ImGui::TextDisabled(has_settings ? "Every achievement set is off. Turn one on in Settings."
+                                     : "Every achievement set is off.");
   for (const AchievementSet* set : sets) {
     if (!selected_set_.empty() && set->id != selected_set_) continue;
     ImGui::PushID(set->id.c_str());
@@ -267,6 +392,10 @@ void AchievementListWindow::DrawContents() {
         if (options_.show_credits && !a.credits.empty() && !hidden)
           ImGui::TextDisabled("Credits: %s", CreditsLine(a.credits).c_str());
         if (options_.show_test_button && ImGui::SmallButton("Test popup")) system_.TestPopup(a.key);
+        if (reset_mode_) {
+          if (options_.show_test_button) ImGui::SameLine();
+          if (ImGui::SmallButton("Reset")) AskReset("\"" + name + "\"", {a.key}, {}, false);
+        }
         ImGui::EndGroup();
         ImGui::EndGroup();
         ImGui::Spacing();
@@ -276,6 +405,8 @@ void AchievementListWindow::DrawContents() {
     ImGui::PopID();
   }
   ImGui::EndChild();
+  DrawResetConfirmation();
+  ImGui::PopID();
 }
 
 }  // namespace recomp::achievements::ui

@@ -121,6 +121,35 @@ auto binding = recomp::achievements::BindRexglue(kernel_state, system, "my_game"
   a TU install; the destructor (or `Unbind()`) clears the kernel callbacks, so
   destroy the binding before the `System`.
 
+### Splitting off achievements the recomp can't support
+
+Some titles have achievements a recomp can never award as-is, for example online-only ones whose servers are
+gone. Move them into a set of their own that starts off, so the title's list can still reach its total with
+replacement achievements, and players who want the originals can turn the set on in the settings:
+
+```cpp
+opts.split_sets = {{.set_id = "my_game_online", .title = "Online (original)", .ids = {29, 30, 48},
+                    .enabled_by_default = false}};
+auto binding = recomp::achievements::BindRexglue(kernel_state, system, "my_game", opts);
+```
+
+The binding builds the title's set, moves those XDBF ids out with `SplitSet()`, and adds both sets. Moved
+achievements are keyed `my_game_online:29` and keep `my_game:29` as a legacy key, so progress saved before the split
+still counts. `xam()` looks ids up in the split sets too (`XamAchievements::AddSetId`): a write for an
+achievement of a set that's off is known (it doesn't reach `on_unknown_achievement`) but doesn't unlock, and
+it reads as locked in the game's enumerators and `IsUnlocked()`. Without the binding, do the same by hand:
+
+```cpp
+xbox::XdbfSetOptions o;
+o.set_id = "my_game";
+AchievementSet set = title.ToAchievementSet(o);
+const uint32_t online[] = {29, 30, 48};
+AchievementSet extra = SplitSet(set, online, "my_game_online", "Online (original)", /*enabled_by_default=*/false);
+system.AddSet(std::move(set));
+system.AddSet(std::move(extra));
+xam.AddSetId("my_game_online");
+```
+
 Known gap: the patched enumerator reads names from the XEX database only, not
 the TU's `spa.bin`, so achievements only the TU has don't appear in the game's
 own list (they still unlock and show in the SDK's UI).

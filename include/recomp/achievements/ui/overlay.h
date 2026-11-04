@@ -97,7 +97,9 @@ struct OverlayOptions {
 
   // Sounds. With play_sound the overlay resolves each popup's sound (override
   // WAVs included) and hands over the PCM for the game to mix; sound_handler
-  // gets the raw requests instead. Neither: silent.
+  // gets the raw requests instead. Neither: silent. Either way the player's
+  // popup sound setting is applied first: nothing is sent while it's off, and
+  // the volume passed already includes it (GetPopupSoundSettings()).
   std::function<void(std::shared_ptr<const Pcm> pcm, float volume, NotificationKind kind)> play_sound;
   NotificationCenter::SoundHandler sound_handler;
 
@@ -115,6 +117,14 @@ struct OverlayOptions {
   bool popups_over_viewer = true;
   bool allow_reveal_secrets = true;
   bool show_credits = true;
+  // The settings page (Start / F2, or the gear in the header). Hide it, or
+  // the sections a game already offers in its own menus.
+  bool show_settings = true;
+  bool settings_sound = true;  // Popup sound on/off and volume.
+  bool settings_sets = true;   // Turning each achievement set on and off.
+  bool settings_reset = true;  // Resetting chosen achievements, a set, or everything.
+  // How long a reset has to be held to go through.
+  float reset_hold_seconds = 1.2f;
   std::string title = "Achievements";
 
   // TTF/OTF bytes; empty = the bundled DejaVu Sans. A regular font without a
@@ -148,6 +158,8 @@ class Overlay {
   bool visible() const;
 
   void Open();
+  // Opens the viewer on its settings page (e.g. from the game's own menu).
+  void OpenSettings();
   void Close();
   void Toggle();
   bool is_open() const;
@@ -182,6 +194,15 @@ class Overlay {
     std::vector<std::string> names;  // As shown (secret text for hidden ones).
     std::vector<std::string> expanded;
     float scroll = 0.0f;  // Pixels.
+    // The settings page and the reset mode of the list.
+    bool settings = false;
+    bool reset_mode = false;   // The list picks achievements to reset.
+    std::vector<std::string> tabs;  // Set ids; "" = all sets.
+    // Settings rows, in order: "sound", "volume", "set:<id>", "reset:pick",
+    // "reset:set:<id>", "reset:all".
+    std::vector<std::string> setting_rows;
+    std::string setting_selected;
+    float hold = 0.0f;  // 0..1 while a reset is being held.
   };
   ViewState view_state() const;
 

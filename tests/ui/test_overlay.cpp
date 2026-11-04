@@ -2,6 +2,7 @@
 // secrets, redraw decisions and popups. No GPU, no ImGui.
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 
@@ -564,4 +565,315 @@ TEST(overlay_full_dirty_rect_when_reappearing) {
   r.system.Unlock("c:c2");
   CHECK(r.Step());
   CHECK(r.overlay->dirty_rect().width() == 1920);
+}
+
+TEST(overlay_settings_page_navigation) {
+  Rig r;
+  r.overlay->Open();
+  r.Settle();
+  CHECK(!r.V().settings);
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  auto v = r.V();
+  CHECK(v.settings);
+  CHECK_EQ(v.setting_rows, (std::vector<std::string>{"sound", "volume", "set:x", "set:c", "reset:pick", "reset:set:x",
+                                                     "reset:set:c", "reset:all"}));
+  CHECK_EQ(v.setting_selected, std::string("sound"));
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("volume"));
+  r.Tap([](OverlayInput& in) { in.end = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("reset:all"));
+  // B goes back to the list, not out of the viewer; F2 opens it again.
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  CHECK(!r.V().settings);
+  CHECK(r.overlay->is_open());
+  r.Tap([](OverlayInput& in) { in.f[2] = true; });
+  CHECK(r.V().settings);
+  CHECK_EQ(r.V().setting_selected, std::string("reset:all"));  // Remembered.
+  r.Tap([](OverlayInput& in) { in.escape = true; });
+  CHECK(!r.V().settings);
+  r.overlay->Close();
+  r.Settle();
+  r.overlay->OpenSettings();
+  r.Settle();
+  CHECK(r.overlay->is_open());
+  CHECK(r.V().settings);
+  // The chord still closes from the settings page, and Start's press is undone.
+  OverlayInput chord;
+  chord.pad_start = true;
+  r.Step(chord);
+  CHECK(!r.V().settings);
+  chord.pad_lb = true;
+  r.Step(chord);
+  CHECK(!r.overlay->is_open());
+  r.Settle();
+  r.overlay->Open();
+  r.Settle();
+  CHECK(!r.V().settings);
+}
+
+TEST(overlay_settings_toggle_set) {
+  Rig r;
+  r.overlay->Open();
+  r.Settle();
+  CHECK_EQ(r.V().tabs, (std::vector<std::string>{"", "x", "c"}));
+  CHECK_EQ(r.V().keys.size(), 11u);
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  while (r.V().setting_selected != "set:c") r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  const uint64_t gen = r.system.generation();
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK(!r.system.IsSetEnabled("c"));
+  CHECK(r.system.generation() > gen);
+  // The row stays (sets that are off are listed), selected.
+  CHECK_EQ(r.V().setting_selected, std::string("set:c"));
+  CHECK_EQ(r.V().tabs, (std::vector<std::string>{"x"}));  // One set left: no "All".
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  auto v = r.V();
+  CHECK_EQ(v.keys.size(), 8u);
+  CHECK(std::none_of(v.keys.begin(), v.keys.end(), [](const std::string& k) { return k.rfind("c:", 0) == 0; }));
+  CHECK_EQ(r.system.GetTotals().count, 8u);
+  // No popup can come from it while it's off.
+  r.system.Unlock("c:c2");
+  r.Settle(5);
+  CHECK(r.overlay->center().Active().empty());
+  // Left / right also switch it, and turning it back on restores everything.
+  r.Tap([](OverlayInput& in) { in.f[2] = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("set:c"));
+  r.Tap([](OverlayInput& in) { in.left = true; });  // Already off.
+  CHECK(!r.system.IsSetEnabled("c"));
+  r.Tap([](OverlayInput& in) { in.right = true; });
+  CHECK(r.system.IsSetEnabled("c"));
+  CHECK_EQ(r.V().tabs, (std::vector<std::string>{"", "x", "c"}));
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  CHECK_EQ(r.V().keys.size(), 11u);
+}
+
+TEST(overlay_settings_volume_and_sound) {
+  std::vector<float> played;
+  OverlayOptions opt;
+  opt.play_sound = [&](std::shared_ptr<const Pcm>, float volume, NotificationKind) { played.push_back(volume); };
+  Rig r(opt);
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("volume"));
+  // Left / right step 10%, saved in the System, with a preview each time.
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  r.Tap([](OverlayInput& in) { in.left = true; });
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.8f, 1e-6);
+  CHECK_EQ(played.size(), 2u);
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.9f, 1e-6);
+  CHECK_NEAR(r.system.GetSetting("popup_sound")["volume"].get<double>(), 0.9, 1e-9);
+  CHECK(r.overlay->is_open());
+  CHECK(r.V().settings);  // Left / right adjust here instead of switching tabs.
+  for (int i = 0; i < 15; ++i) r.Tap([](OverlayInput& in) { in.right = true; });
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 1.0f, 1e-6);
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+
+  // Popups play at the style's volume times the player's.
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  played.clear();
+  r.system.Unlock("c:c1");
+  r.Settle(5);
+  CHECK_EQ(played.size(), 1u);
+  const float style_volume = r.overlay->styles().Resolve(r.system.FindSet("c"))->sound.volume;
+  CHECK(!played.empty() && std::fabs(played[0] - style_volume * 0.9f) < 1e-4f);
+
+  // Sound off: nothing reaches the game's mixer.
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  r.Tap([](OverlayInput& in) { in.pad_up = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("sound"));
+  r.Tap([](OverlayInput& in) { in.enter = true; });
+  CHECK(!GetPopupSoundSettings(r.system).enabled);
+  played.clear();
+  r.overlay->Close();
+  r.Settle();
+  r.system.Unlock("c:c2");
+  r.Settle(5);
+  CHECK(!r.overlay->center().Active().empty());  // The popup still shows...
+  CHECK(played.empty());                          // ...silently.
+
+  // A game's own sound_handler gets the scaled volume too.
+  System sys;
+  SetPopupSoundSettings(sys, {true, 0.5f});
+  AchievementSet c = CustomSet();
+  sys.AddSet(c);
+  std::vector<float> requested;
+  OverlayOptions h;
+  h.global_preferences = false;
+  h.sound_handler = [&](const NotificationCenter::SoundRequest& req) { requested.push_back(req.volume); };
+  Overlay o(sys, h);
+  o.SetSize(640, 360);
+  sys.Unlock("c:c0");
+  for (int i = 0; i < 5; ++i) o.Frame(1.0f / 60, {});
+  CHECK_EQ(requested.size(), 1u);
+  const float sv = o.styles().Resolve(sys.FindSet("c"))->sound.volume;
+  CHECK(!requested.empty() && std::fabs(requested[0] - sv * 0.5f) < 1e-4f);
+}
+
+TEST(overlay_settings_reset_needs_a_hold) {
+  Rig r;
+  r.system.Unlock("c:c0");
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  while (r.V().setting_selected != "reset:set:c") r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  // A press, and a press held for under the time: nothing.
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK(r.system.IsUnlocked("c:c0"));
+  OverlayInput a;
+  a.pad_a = true;
+  for (int i = 0; i < 40; ++i) r.Step(a);  // 0.67 s.
+  CHECK(r.V().hold > 0.3f && r.V().hold < 1.0f);
+  r.Step();
+  CHECK_EQ(r.V().hold, 0.0f);
+  CHECK(r.system.IsUnlocked("c:c0"));
+  // One very long frame doesn't confirm either.
+  r.Step(a, 5.0f);
+  CHECK(r.system.IsUnlocked("c:c0"));
+  r.Step();
+  // Held through: that set only.
+  for (int i = 0; i < 90; ++i) r.Step(a);
+  CHECK(!r.system.IsUnlocked("c:c0"));
+  CHECK(r.system.IsUnlocked("x:a0"));
+  // Still held: it doesn't start again.
+  for (int i = 0; i < 90; ++i) r.Step(a);
+  CHECK_EQ(r.V().hold, 0.0f);
+  r.Step();
+  // Everything, with Enter held.
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("reset:all"));
+  OverlayInput enter;
+  enter.enter = true;
+  for (int i = 0; i < 90; ++i) r.Step(enter);
+  CHECK(!r.system.IsUnlocked("x:a0"));
+  CHECK(r.system.GetProgress("x:a3")->completed.empty());
+}
+
+TEST(overlay_reset_chosen_achievements) {
+  Rig r;
+  r.system.Unlock("x:a1");
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  while (r.V().setting_selected != "reset:pick") r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  auto v = r.V();
+  CHECK(!v.settings);
+  CHECK(v.reset_mode);
+  CHECK_EQ(v.selected, std::string("x:a0"));
+  // A on a row doesn't expand it here, and a tap resets nothing.
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK(r.V().expanded.empty());
+  CHECK(r.system.IsUnlocked("x:a0"));
+  OverlayInput a;
+  a.pad_a = true;
+  for (int i = 0; i < 90; ++i) r.Step(a);
+  CHECK(!r.system.IsUnlocked("x:a0"));
+  CHECK(r.system.IsUnlocked("x:a1"));
+  r.Step();
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().selected, std::string("x:a1"));
+  // B leaves reset mode for the settings page, on the row that started it.
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  v = r.V();
+  CHECK(v.settings);
+  CHECK(!v.reset_mode);
+  CHECK_EQ(v.setting_selected, std::string("reset:pick"));
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  CHECK(!r.V().settings);
+  CHECK(!r.V().reset_mode);
+  // Out of reset mode, A expands again.
+  while (r.V().selected != "x:a3") r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK_EQ(r.V().expanded.size(), 1u);
+}
+
+TEST(overlay_settings_mouse) {
+  Rig r(OverlayOptions{}, 1280, 720);
+  r.overlay->Open();
+  r.Settle();
+  // The gear beside the title opens the page.
+  bool opened = false;
+  for (float x = 330; x < 560 && !opened; x += 10) {
+    OverlayInput in;
+    in.mouse_present = true;
+    in.mouse_x = x;
+    in.mouse_y = 60;
+    r.Step(in);
+    in.mouse_left = true;
+    r.Step(in);
+    in.mouse_left = false;
+    r.Step(in);
+    opened = r.V().settings;
+  }
+  CHECK(opened);
+  // Hover, then click the second set's switch row: off.
+  bool toggled = false;
+  for (float y = 150; y < 700 && !toggled; y += 8) {
+    OverlayInput in;
+    in.mouse_present = true;
+    in.mouse_x = 640;
+    in.mouse_y = y;
+    r.Step(in);
+    if (r.V().setting_selected != "set:c") continue;
+    in.mouse_left = true;
+    r.Step(in);
+    in.mouse_left = false;
+    r.Step(in);
+    toggled = true;
+  }
+  CHECK(toggled);
+  CHECK(!r.system.IsSetEnabled("c"));
+}
+
+TEST(overlay_settings_options_hide_it) {
+  OverlayOptions none;
+  none.show_settings = false;
+  Rig r(none);
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  CHECK(!r.V().settings);
+  r.overlay->OpenSettings();
+  r.Settle();
+  CHECK(!r.V().settings);
+
+  OverlayOptions some;
+  some.settings_sound = false;
+  some.settings_reset = false;
+  Rig q(some);
+  q.overlay->Open();
+  q.Settle();
+  q.Tap([](OverlayInput& in) { in.f[2] = true; });
+  CHECK(q.V().settings);
+  CHECK_EQ(q.V().setting_rows, (std::vector<std::string>{"set:x", "set:c"}));
+}
+
+TEST(overlay_settings_render) {
+  // Every page draws, with both label sets and at a small size.
+  for (ButtonLabels labels : {ButtonLabels::kXbox, ButtonLabels::kPlayStation}) {
+    OverlayOptions opt;
+    opt.buttons = labels;
+    Rig r(opt, 1280, 720);
+    r.overlay->Open();
+    r.Settle();
+    r.Tap([](OverlayInput& in) { in.pad_start = true; });
+    r.Settle();
+    CHECK(Any(r.overlay->image()));
+    r.system.SetSetEnabled("x", false);
+    r.system.SetSetEnabled("c", false);
+    r.Settle();
+    r.Tap([](OverlayInput& in) { in.pad_b = true; });
+    r.Settle();
+    CHECK(r.V().keys.empty());  // "Every achievement set is off."
+    r.overlay->SetSize(320, 200);
+    r.Tap([](OverlayInput& in) { in.pad_start = true; });
+    r.Settle();
+    CHECK(Any(r.overlay->image()));
+  }
 }

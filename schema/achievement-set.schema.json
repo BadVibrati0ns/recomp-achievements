@@ -43,6 +43,11 @@
           "default": 0,
           "description": "When the points add up to more than this, they are scaled down to exactly this total. 0: no cap."
         },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the set counts until the player turns it on or off in the achievement settings. Off: it can't unlock and its points are hidden until turned on."
+        },
         "credits": { "$ref": "#/$defs/credits" },
         "source": {
           "type": "object",

@@ -172,7 +172,9 @@ the set on screen, so `platforms` and `sets` patches can recolour it. A player's
 ```
 
 A sound ref is `"builtin:<name>"`, a path to a WAV file (relative paths resolve
-from the JSON file that names them), or `"none"` / `null` for silence. The tier
+from the JSON file that names them), or `"none"` / `null` for silence.
+`volume` is the style's level; the player's popup sound switch and volume from
+the in-game settings (`ui::GetPopupSoundSettings`) apply on top of it. The tier
 keys override `unlock` for trophies of that tier; empty means "use `unlock`".
 
 Built-in sounds are synthesised at runtime. They are our own sounds, made to
