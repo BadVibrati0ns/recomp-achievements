@@ -38,9 +38,11 @@ PopupUi::PopupUi(System& system, PopupUiOptions options)
   InstallSdlImageDecoder(icons_);
 
   center_.Attach(system_);
+  library_ = MakeLibrary(system_, options_.library, icons_, options_.fallback_icon);
 }
 
 PopupUi::~PopupUi() {
+  library_.reset();
   center_.Detach();
   center_.SetSoundHandler(nullptr);
 }

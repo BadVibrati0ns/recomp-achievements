@@ -18,6 +18,10 @@ list of its own.
 - **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
   in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
+- **One library for every game:** each game keeps a copy of its sets, icons and progress, plus an
+  append-only event log, in a shared folder next to the player's preferences, so a desktop app can
+  show every recomp's achievements without reading any game's files. A Windows build under Proton
+  writes to the Linux host's folder. See [docs/library.md](docs/library.md).
 - **Player settings, in game:** the viewer's settings page turns each achievement set on and off (a set
   that's off hides its points, can't unlock and keeps its progress; sets can start off), resets chosen
   achievements, a set or everything behind a hold-to-confirm, and sets the popup sound and volume. The
@@ -29,7 +33,7 @@ list of its own.
 
 | CMake target | What it does | Needs |
 |---|---|---|
-| `recomp::achievements` | Registry, JSON sets, triggers, saves | nothing (nlohmann/json is bundled) |
+| `recomp::achievements` | Registry, JSON sets, triggers, saves, the shared achievement library (writer and reader) | threads (nlohmann/json is bundled) |
 | `recomp::achievements_ui` | Popups, list window, styles, sounds, icons | Dear ImGui and SDL3 targets (each optional) |
 | `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding, and the software overlay (viewer + popups, `Canvas`, fonts) | nothing (stb_truetype and DejaVu Sans are bundled) |
 | `recomp::achievements_xbox` | XDBF / SPA reader, title update search | nothing |
@@ -52,7 +56,7 @@ path. Compile these sources and set these defines:
 
 | Part | Sources | Defines |
 |---|---|---|
-| core | `src/system.cpp`, `src/json_format.cpp` | none |
+| core | `src/system.cpp`, `src/json_format.cpp`, `src/config_dir.cpp`, `src/library.cpp`, `src/library_reader.cpp`, `src/library_util.cpp` (link the platform's threads library, e.g. `-pthread`) | none |
 | UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `overlay.cpp` | none |
 | UI, fonts | `DejaVuSans.cpp`, `DejaVuSans-Bold.cpp`, generated from `assets/fonts` with `cmake -DINPUT=assets/fonts/DejaVuSans.ttf -DOUTPUT=DejaVuSans.cpp -DSYMBOL=kDejaVuSans -P cmake/embed_file.cmake` (and `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`) | or none of them and `RECOMP_ACH_NO_EMBEDDED_FONTS=1`; then pass `OverlayOptions::font` |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
@@ -80,6 +84,7 @@ ui::PopupUiOptions popup_options;
 popup_options.user_dir = user_dir;                       // achievements_style.json, sounds/*.wav
 popup_options.fallback_icon = "assets/icon.png";         // the game's desktop icon, for custom achievements
 popup_options.create_texture = UploadRgbaTexture;        // your renderer
+popup_options.library.game_id = "my_game";               // the shared library (docs/library.md)
 ui::PopupUi popups(achievements, popup_options);
 
 // In game code:
@@ -112,6 +117,7 @@ A minimal set file:
 - [JSON set format](docs/json-format.md) ([schema](schema/achievement-set.schema.json))
 - [Popup styles and sounds](docs/styling.md)
 - [Achievement overlay without ImGui](docs/overlay.md)
+- [The shared achievement library](docs/library.md): its format, privacy, Proton and sync
 - [Xbox 360 / rexglue](docs/xbox360.md), including [splitting off unsupported achievements](docs/xbox360.md#splitting-off-achievements-the-recomp-cant-support)
 - [PS3 trophies](docs/ps3.md)
 - [RetroAchievements lists](docs/retroachievements.md) and the [import tool](tools/README.md)

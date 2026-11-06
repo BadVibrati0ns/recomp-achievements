@@ -191,6 +191,7 @@ can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()`
 | `game_style_file`, `user_dir`, `sound_dirs` | empty | As in `PopupUiOptions`: style files and replacement WAV folders. |
 | `global_preferences`, `create_global_preferences` | true, true | Load the player's preferences for every game, and create that folder with a commented starter file. |
 | `fallback_icon` | empty | Icon for achievements without one (usually the game's desktop icon). |
+| `library` | off | The shared achievement library ([library.md](library.md)): on once `library.game_id` is set. Its icons come from `icons()`, its game icon defaults to `fallback_icon`; `library()` returns it. |
 | `center`, `styles`, `icons` | null | Borrow the game's own instead of making new ones. A borrowed center isn't attached or given sounds; a borrowed `IconCache` must hand out CPU images (`ui::UseImageTextures(cache)`). |
 | `advance_center` | true | `Frame()` advances the popups. |
 | `play_sound` | null | Gets each popup's PCM (override WAVs applied) to mix yourself, at the volume to play it (the player's setting included). Not called while popup sound is off. |

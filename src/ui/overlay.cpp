@@ -284,6 +284,7 @@ struct Overlay::Impl {
   std::unique_ptr<NotificationCenter> own_center;
   std::unique_ptr<StyleManager> own_styles;
   std::unique_ptr<IconCache> own_icons;
+  std::unique_ptr<Library> library;
   NotificationCenter* center;
   StyleManager* styles;
   IconCache* icons;
@@ -479,9 +480,11 @@ struct Overlay::Impl {
     }
     if (font && font != Font::Builtin(false) && Font::Builtin(false)) font->SetFallback(Font::Builtin(false));
     if (font_bold && font_bold != Font::Builtin(true) && Font::Builtin(true)) font_bold->SetFallback(Font::Builtin(true));
+    library = MakeLibrary(system, options.library, *icons, options.fallback_icon);
   }
 
   ~Impl() {
+    library.reset();  // It reads icons through this overlay's cache.
     system.RemoveListener(unlock_listener);
     system.RemoveListener(progress_listener);
     if (own_center) {
@@ -2474,6 +2477,7 @@ NotificationCenter& Overlay::center() { return *impl_->center; }
 StyleManager& Overlay::styles() { return *impl_->styles; }
 IconCache& Overlay::icons() { return *impl_->icons; }
 SoundBank& Overlay::sounds() { return impl_->bank; }
+Library* Overlay::library() { return impl_->library.get(); }
 Overlay::Stats Overlay::stats() const { return impl_->stats; }
 
 Overlay::ViewState Overlay::view_state() const {

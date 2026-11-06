@@ -1105,6 +1105,23 @@ System::Totals System::GetTotals(std::string_view set_id) const {
   return totals;
 }
 
+System::State System::CopyState() const {
+  std::lock_guard lock(impl_->mutex);
+  State state;
+  state.profile = impl_->profile;
+  state.generation = impl_->generation;
+  state.sets.reserve(impl_->sets.size());
+  for (const auto& entry : impl_->sets) {
+    SetState s;
+    s.set = entry->set;
+    s.enabled = entry->enabled;
+    s.views.reserve(entry->set->achievements.size());
+    for (size_t i = 0; i < entry->set->achievements.size(); ++i) s.views.push_back(impl_->View(*entry, i));
+    state.sets.push_back(std::move(s));
+  }
+  return state;
+}
+
 void System::TestPopup(std::string_view key) {
   Outbox out;
   {

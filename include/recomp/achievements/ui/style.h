@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "recomp/achievements/config_dir.h"
 #include "recomp/achievements/types.h"
 
 namespace recomp::achievements::ui {
@@ -233,13 +234,10 @@ std::string FormatText(std::string_view fmt, const std::map<std::string, std::st
 // "sets"[<set id>]. The theme comes from the highest of those patches that
 // names one ("auto" = by platform), and patches below that one are skipped
 // because they were tuning a different theme. Thread-safe.
-// The player's preferences for every game using this SDK:
-//   Windows        %APPDATA%\recomp-achievements
-//   Linux, macOS   $XDG_CONFIG_HOME/recomp-achievements (default ~/.config/...)
-// RECOMP_ACHIEVEMENTS_CONFIG_DIR overrides it. Holds achievements_style.json
-// (the same format as a game's style file) and sounds/*.wav. Empty when no
-// home folder can be found.
-std::filesystem::path GlobalConfigDir();
+// The player's preferences for every game using this SDK (now in core,
+// config_dir.h; kept here under its old name). Holds achievements_style.json
+// (the same format as a game's style file) and sounds/*.wav.
+using recomp::achievements::GlobalConfigDir;
 // Creates GlobalConfigDir() with a commented achievements_style.json that
 // changes nothing and an empty sounds/ folder, so players can find them.
 // Leaves existing files alone. Returns the folder, or empty on failure.

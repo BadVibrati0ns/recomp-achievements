@@ -891,11 +891,6 @@ json StyleToJson(const Style& s) {
 
 namespace {
 
-std::filesystem::path EnvPath(const char* name) {
-  const char* value = std::getenv(name);
-  return value && *value ? std::filesystem::path(value) : std::filesystem::path();
-}
-
 // Written once so players can find the file; every setting is commented out.
 constexpr const char* kGlobalStyleTemplate = R"(// Achievement popups for every game that uses recomp-achievements.
 // Settings here override each game's own style; a game's own
@@ -914,19 +909,6 @@ constexpr const char* kGlobalStyleTemplate = R"(// Achievement popups for every 
 )";
 
 }  // namespace
-
-std::filesystem::path GlobalConfigDir() {
-  if (auto dir = EnvPath("RECOMP_ACHIEVEMENTS_CONFIG_DIR"); !dir.empty()) return dir;
-#if defined(_WIN32)
-  if (auto appdata = EnvPath("APPDATA"); !appdata.empty()) return appdata / "recomp-achievements";
-  if (auto profile = EnvPath("USERPROFILE"); !profile.empty())
-    return profile / "AppData" / "Roaming" / "recomp-achievements";
-#else
-  if (auto xdg = EnvPath("XDG_CONFIG_HOME"); !xdg.empty() && xdg.is_absolute()) return xdg / "recomp-achievements";
-  if (auto home = EnvPath("HOME"); !home.empty()) return home / ".config" / "recomp-achievements";
-#endif
-  return {};
-}
 
 std::filesystem::path EnsureGlobalConfigDir() {
   const auto dir = GlobalConfigDir();

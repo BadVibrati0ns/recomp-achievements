@@ -154,6 +154,21 @@ class System {
   // Empty set_id: the sets that are on. A set id: that set, even when off
   // (so a settings page can show what turning it on would bring back).
   Totals GetTotals(std::string_view set_id = {}) const;
+  // A consistent copy of every set for another thread (the library writer):
+  // the shared pointers keep the sets alive, so the views stay valid for as
+  // long as the State does. Views are in each set's own order, not
+  // display_order.
+  struct SetState {
+    std::shared_ptr<const AchievementSet> set;
+    bool enabled = true;
+    std::vector<AchievementView> views;
+  };
+  struct State {
+    std::vector<SetState> sets;  // Load order, on or off.
+    std::string profile;
+    uint64_t generation = 0;
+  };
+  State CopyState() const;
   // Sends an unlock event with replay = true without saving anything. Empty
   // key: the first locked achievement of a set that is on (or the first one
   // if all are unlocked).

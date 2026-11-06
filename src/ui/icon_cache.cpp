@@ -1,5 +1,6 @@
 #include "recomp/achievements/ui/icon_cache.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 
@@ -86,14 +87,13 @@ void IconCache::SetRetrySeconds(double seconds) {
   retry_seconds_ = seconds;
 }
 
-IconResult IconCache::Load(std::string_view ref, std::string_view set_id,
-                           const std::filesystem::path& base_dir, Image& out) {
+IconResult IconCache::Fetch(std::string_view ref, std::string_view set_id,
+                            const std::filesystem::path& base_dir, IconData& out) {
   if (ref.empty()) return IconResult::kMissing;
   std::string_view scheme, body;
   SplitIconRef(ref, scheme, body);
 
   Provider provider;
-  Decoder decoder;
   {
     std::lock_guard lock(mutex_);
     if (!scheme.empty()) {
@@ -101,30 +101,40 @@ IconResult IconCache::Load(std::string_view ref, std::string_view set_id,
       if (it == providers_.end()) return IconResult::kMissing;
       provider = it->second;
     }
-    decoder = decoder_;
   }
 
-  IconData data;
   if (provider) {
     IconRequest req{ref, scheme, body, set_id, &base_dir};
-    const IconResult r = provider(req, data);
-    if (r != IconResult::kOk) return r;
-  } else {
-    std::filesystem::path path{std::string(body)};
-    if (path.is_relative() && !base_dir.empty()) path = base_dir / path;
-    if (!ReadFileBytes(path, data.bytes)) return IconResult::kMissing;
+    return provider(req, out);
   }
+  std::filesystem::path path{std::string(body)};
+  if (path.is_relative() && !base_dir.empty()) path = base_dir / path;
+  return ReadFileBytes(path, out.bytes) ? IconResult::kOk : IconResult::kMissing;
+}
 
+bool IconCache::Decode(std::span<const uint8_t> bytes, Image& out) const {
+  Decoder decoder;
+  {
+    std::lock_guard lock(mutex_);
+    decoder = decoder_;
+  }
+  Image img;
+  if (bytes.empty() || !decoder || !decoder(bytes, img) || img.width <= 0 || img.height <= 0) return false;
+  out = std::move(img);
+  return true;
+}
+
+IconResult IconCache::Load(std::string_view ref, std::string_view set_id,
+                           const std::filesystem::path& base_dir, Image& out) {
+  IconData data;
+  const IconResult r = Fetch(ref, set_id, base_dir, data);
+  if (r != IconResult::kOk) return r;
   if (data.image.width > 0 && data.image.height > 0 &&
       data.image.rgba.size() >= static_cast<size_t>(data.image.width) * data.image.height * 4) {
     out = std::move(data.image);
     return IconResult::kOk;
   }
-  if (data.bytes.empty() || !decoder) return IconResult::kMissing;
-  Image img;
-  if (!decoder(data.bytes, img) || img.width <= 0 || img.height <= 0) return IconResult::kMissing;
-  out = std::move(img);
-  return IconResult::kOk;
+  return Decode(data.bytes, out) ? IconResult::kOk : IconResult::kMissing;
 }
 
 void* IconCache::Get(std::string_view ref, std::string_view set_id, const std::filesystem::path& base_dir) {
@@ -206,6 +216,40 @@ void IconCache::Clear() {
 size_t IconCache::size() const {
   std::lock_guard lock(mutex_);
   return entries_.size();
+}
+
+LibraryIconSource LibraryIconSourceFor(IconCache& icons) {
+  return [&icons](std::string_view ref, std::string_view set_id, const std::filesystem::path& base_dir,
+                  LibraryIcon& out) {
+    IconData data;
+    if (icons.Fetch(ref, set_id, base_dir, data) != IconResult::kOk) return false;
+    const Image& img = data.image;
+    if (img.width > 0 && img.height > 0 && img.rgba.size() >= static_cast<size_t>(img.width) * img.height * 4) {
+      out.width = img.width;
+      out.height = img.height;
+      out.rgba = img.rgba;
+      return true;
+    }
+    static constexpr uint8_t kPng[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+    if (data.bytes.size() >= 8 && std::equal(kPng, kPng + 8, data.bytes.begin())) {
+      out.png = std::move(data.bytes);
+      return true;
+    }
+    Image decoded;
+    if (!icons.Decode(data.bytes, decoded)) return false;
+    out.width = decoded.width;
+    out.height = decoded.height;
+    out.rgba = std::move(decoded.rgba);
+    return true;
+  };
+}
+
+std::unique_ptr<Library> MakeLibrary(System& system, LibraryOptions options, IconCache& icons,
+                                     const std::string& fallback_icon) {
+  if (!options.enabled || options.game_id.empty()) return nullptr;
+  if (!options.icon_source) options.icon_source = LibraryIconSourceFor(icons);
+  if (options.icon.empty()) options.icon = fallback_icon;
+  return std::make_unique<Library>(system, std::move(options));
 }
 
 }  // namespace recomp::achievements::ui

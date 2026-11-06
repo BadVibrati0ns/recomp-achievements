@@ -33,6 +33,10 @@ struct PopupUiOptions {
   // Icon for achievements without one (most custom ones): usually the game's
   // desktop icon. A file path or any icon ref.
   std::string fallback_icon;
+  // The shared achievement library every game writes to (docs/library.md).
+  // On once library.game_id is set; its icons come from icons() and its game
+  // icon defaults to fallback_icon.
+  LibraryOptions library;
   IconCache::CreateTexture create_texture;
   IconCache::DestroyTexture destroy_texture;
   bool sounds = true;
@@ -49,6 +53,8 @@ class PopupUi {
   IconCache& icons() { return icons_; }
   ImGuiRenderer& renderer() { return renderer_; }
   AchievementListWindow& list() { return list_; }
+  // Null unless options.library is on.
+  Library* library() { return library_.get(); }
 
   // Re-reads both style files and drops cached sounds (e.g. after the user edits them).
   bool ReloadStyles(std::string* error = nullptr);
@@ -65,6 +71,7 @@ class PopupUi {
   IconCache icons_;
   ImGuiRenderer renderer_;
   AchievementListWindow list_;
+  std::unique_ptr<Library> library_;
 };
 
 }  // namespace recomp::achievements::ui

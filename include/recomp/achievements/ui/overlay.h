@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "recomp/achievements/library.h"
 #include "recomp/achievements/system.h"
 #include "recomp/achievements/ui/canvas.h"
 #include "recomp/achievements/ui/icon_cache.h"
@@ -86,6 +87,10 @@ struct OverlayOptions {
   bool create_global_preferences = true;  // Create GlobalConfigDir() with a starter file.
   // Icon for achievements without one, usually the game's desktop icon.
   std::string fallback_icon;
+  // The shared achievement library every game writes to (docs/library.md).
+  // On once library.game_id is set; its icons come from this overlay's
+  // IconCache and its game icon defaults to fallback_icon.
+  LibraryOptions library;
 
   // Parts the game already has; null = the overlay makes its own. A borrowed
   // center is neither attached to the System nor given sounds here, and a
@@ -182,6 +187,8 @@ class Overlay {
   StyleManager& styles();
   IconCache& icons();
   SoundBank& sounds();
+  // Null unless options.library is on.
+  Library* library();
 
   // What the viewer shows, for tests and tools.
   struct ViewState {

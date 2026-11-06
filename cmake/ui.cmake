@@ -97,7 +97,8 @@ if(RECOMP_ACH_BUILD_TESTS)
       ${_ach_ui_tests}/test_sounds.cpp
       ${_ach_ui_tests}/test_icon_cache.cpp
       ${_ach_ui_tests}/test_canvas.cpp
-      ${_ach_ui_tests}/test_overlay.cpp)
+      ${_ach_ui_tests}/test_overlay.cpp
+      ${_ach_ui_tests}/test_library_icons.cpp)
   target_link_libraries(recomp_achievements_ui_tests PRIVATE recomp_achievements_ui_base Threads::Threads)
   # The examples in docs/styling.md are checked for unknown keys.
   target_compile_definitions(recomp_achievements_ui_tests PRIVATE

@@ -10,11 +10,14 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "recomp/achievements/library.h"
 
 namespace recomp::achievements::ui {
 
@@ -87,6 +90,12 @@ class IconCache {
   // Loads the image without creating a texture (for tests / other renderers).
   IconResult Load(std::string_view ref, std::string_view set_id,
                   const std::filesystem::path& base_dir, Image& out);
+  // What the provider (or the file) hands back, not decoded: encoded bytes
+  // or an image. Thread-safe like Load().
+  IconResult Fetch(std::string_view ref, std::string_view set_id,
+                   const std::filesystem::path& base_dir, IconData& out);
+  // Decodes with this cache's decoder (DecodeImage unless replaced).
+  bool Decode(std::span<const uint8_t> bytes, Image& out) const;
 
   void SetRetrySeconds(double seconds);
   void Clear();  // Destroys textures; forget failures.
@@ -110,6 +119,16 @@ class IconCache {
   std::string fallback_ref_;
   std::filesystem::path fallback_base_dir_;
 };
+
+// An icon source for the achievement library (library.h) backed by this
+// cache's providers: PNG bytes as they are, anything else decoded to pixels.
+// The cache must outlive the Library.
+LibraryIconSource LibraryIconSourceFor(IconCache& icons);
+// The Library a UI part (PopupUi, Overlay) runs for its options: null unless
+// options.enabled and options.game_id are set. The icon source defaults to
+// `icons` and the game icon to fallback_icon.
+std::unique_ptr<Library> MakeLibrary(System& system, LibraryOptions options, IconCache& icons,
+                                     const std::string& fallback_icon);
 
 // Splits "scheme:body". Windows drive letters ("C:/x.png") and refs without a
 // scheme come back with an empty scheme.
