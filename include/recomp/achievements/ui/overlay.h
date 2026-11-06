@@ -21,6 +21,7 @@
 #include "recomp/achievements/ui/notification_center.h"
 #include "recomp/achievements/ui/sounds.h"
 #include "recomp/achievements/ui/style.h"
+#include "recomp/achievements/ui/viewer_parts.h"
 
 namespace recomp::achievements::ui {
 
@@ -73,8 +74,6 @@ void SetPadButtons(OverlayInput& in, uint32_t mask, bool down);
 bool ParsePadChord(std::string_view text, uint32_t& out);
 // "F1".."F12" gives 1..12; "none" or "" gives 0. False otherwise.
 bool ParseToggleKey(std::string_view text, int& out);
-
-enum class ButtonLabels { kXbox, kPlayStation };
 
 struct OverlayOptions {
   // Styles and sounds, as in PopupUiOptions: the game's style file, the
@@ -130,6 +129,10 @@ struct OverlayOptions {
   bool settings_reset = true;  // Resetting chosen achievements, a set, or everything.
   // How long a reset has to be held to go through.
   float reset_hold_seconds = 1.2f;
+  // Sets that are off get tabs too, marked Off, with their rows dimmed; they
+  // still leave the totals. For views of another game's data (the library
+  // app); a game's own viewer hides them until they're turned back on.
+  bool show_disabled_sets = false;
   std::string title = "Achievements";
 
   // TTF/OTF bytes; empty = the bundled DejaVu Sans. A regular font without a
@@ -178,6 +181,11 @@ class Overlay {
   OverlayInput GameInput(const OverlayInput& raw) const;
 
   void SetButtonLabels(ButtonLabels labels);
+  // A button of the host app's beside the title, e.g. a profile picker:
+  // clicking it, or Start / F2 when the settings page is off, calls on_press
+  // (from inside Frame(); it may call SetHostButton again). hint labels it in
+  // the footer (empty: label). An empty label or null on_press removes it.
+  void SetHostButton(std::string label, std::string hint, std::function<void()> on_press);
   // A font a style can pick by name ("font": "...").
   void RegisterFont(std::string name, std::shared_ptr<Font> font);
   // Re-reads the style files and drops cached sounds.
@@ -210,6 +218,7 @@ class Overlay {
     std::vector<std::string> setting_rows;
     std::string setting_selected;
     float hold = 0.0f;  // 0..1 while a reset is being held.
+    std::string host_button;  // SetHostButton's label; empty when none.
   };
   ViewState view_state() const;
 

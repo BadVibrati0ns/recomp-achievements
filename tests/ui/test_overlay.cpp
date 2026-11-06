@@ -877,3 +877,53 @@ TEST(overlay_settings_render) {
     CHECK(Any(r.overlay->image()));
   }
 }
+
+TEST(overlay_show_disabled_sets_lists_them_off) {
+  OverlayOptions opt;
+  opt.show_disabled_sets = true;
+  opt.show_settings = false;
+  Rig r(opt);
+  r.system.SetSetEnabled("c", false);
+  r.overlay->Open();
+  r.Settle();
+  // The off set keeps a tab and its rows, but not its points in the totals.
+  CHECK_EQ(r.V().tabs, (std::vector<std::string>{"", "x", "c"}));
+  CHECK_EQ(r.V().keys.size(), size_t(11));
+  CHECK_EQ(r.V().keys.back(), std::string("c:c2"));
+  CHECK_EQ(r.system.GetTotals().count, 8u);
+  r.Tap([](OverlayInput& in) { in.right = true; });
+  r.Tap([](OverlayInput& in) { in.right = true; });
+  CHECK_EQ(r.V().tab, std::string("c"));
+  CHECK_EQ(r.V().keys.size(), size_t(3));
+
+  // Without the option the off set is gone from the viewer.
+  Rig plain;
+  plain.system.SetSetEnabled("c", false);
+  plain.overlay->Open();
+  plain.Settle();
+  CHECK_EQ(plain.V().tabs, (std::vector<std::string>{"x"}));
+}
+
+TEST(overlay_host_button) {
+  OverlayOptions opt;
+  opt.show_settings = false;
+  Rig r(opt);
+  int presses = 0;
+  r.overlay->SetHostButton("Profile: one", "Profile", [&] {
+    ++presses;
+    r.overlay->SetHostButton("Profile: two", "Profile", [&] { ++presses; });
+  });
+  r.overlay->Open();
+  r.Settle();
+  CHECK_EQ(r.V().host_button, std::string("Profile: one"));
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  CHECK_EQ(presses, 1);
+  CHECK_EQ(r.V().host_button, std::string("Profile: two"));
+  r.Tap([](OverlayInput& in) { in.f[2] = true; });
+  CHECK_EQ(presses, 2);
+  CHECK(r.overlay->is_open());
+  r.overlay->SetHostButton("", "", nullptr);
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  CHECK_EQ(presses, 2);
+  CHECK(r.V().host_button.empty());
+}

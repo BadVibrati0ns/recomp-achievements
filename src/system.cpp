@@ -162,6 +162,7 @@ struct System::Impl {
   uint64_t generation = 0;
   // Progress bar totals from RecordValue(key, value, total); never saved.
   std::unordered_map<std::string, uint32_t> bar_totals;
+  std::function<uint64_t()> clock;  // SetClock(); null = the system clock.
   // achievement_settings.json: {"sets": {id: {"enabled": b}}, "settings": {...}}.
   // Entries for sets that aren't loaded and unknown fields are kept.
   fs::path settings_override;
@@ -471,7 +472,7 @@ struct System::Impl {
     Progress& p = loc.progress();
     if (p.unlocked) return false;
     p.unlocked = true;
-    p.unlock_time = Now();
+    p.unlock_time = clock ? clock() : Now();
     QueueUnlock(loc, false, out);
     return true;
   }
@@ -842,6 +843,22 @@ void System::ReloadProgress() {
   impl_->ApplyStoredAll();
   impl_->dirty = false;
   ++impl_->generation;
+}
+
+void System::LoadProgress(const std::map<std::string, Progress>& progress, std::string profile) {
+  std::lock_guard lock(impl_->mutex);
+  impl_->profile = profile.empty() ? std::string("default") : std::move(profile);
+  impl_->stored = json::object();
+  for (const auto& [key, p] : progress)
+    if (detail::HasProgress(p)) impl_->stored[key] = detail::ProgressToJson(p);
+  impl_->ApplyStoredAll();
+  impl_->dirty = false;
+  ++impl_->generation;
+}
+
+void System::SetClock(std::function<uint64_t()> clock) {
+  std::lock_guard lock(impl_->mutex);
+  impl_->clock = std::move(clock);
 }
 
 std::string System::active_profile() const {

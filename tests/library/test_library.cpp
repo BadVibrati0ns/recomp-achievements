@@ -492,3 +492,23 @@ TEST(library_png_encoder) {
            std::string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
   CHECK_EQ(detail::Sha256Hex(std::string(56, 'a')).size(), size_t(64));
 }
+
+TEST(library_clock_stamps_events_and_last_played) {
+  const fs::path root = test::TempDir("library_clock") / "library";
+  System sys;
+  sys.AddSet(MakeSet(root.parent_path() / "game_files"));
+  uint64_t now_ms = 1700000000000;
+  {
+    LibraryOptions o = Options(root);
+    o.clock = [&] { return now_ms; };
+    Library lib(sys, o);
+    now_ms += 5000;
+    CHECK(sys.Unlock("game:a"));
+    lib.Flush();
+    now_ms += 60000;
+  }
+  const auto events = EventLines(root / "my_game" / "events.log");
+  CHECK_EQ(events.size(), size_t(1));
+  CHECK_EQ(events[0]["t"].get<uint64_t>(), uint64_t(1700000005000));
+  CHECK_EQ(test::ReadJson(root / "my_game" / "game.json")["last_played"].get<uint64_t>(), uint64_t(1700000065));
+}

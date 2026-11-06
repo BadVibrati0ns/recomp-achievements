@@ -203,6 +203,7 @@ can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()`
 | `show_settings` | true | The settings page. |
 | `settings_sound`, `settings_sets`, `settings_reset` | true, true, true | Its sections. |
 | `reset_hold_seconds` | 1.2 | How long a reset is held. |
+| `show_disabled_sets` | false | Sets that are off get tabs too, marked Off and dimmed, still out of the totals. For apps showing another game's data. |
 | `title` | `"Achievements"` | Panel title. |
 | `font`, `font_bold` | empty | TTF/OTF bytes; empty uses the bundled DejaVu Sans. A regular font with no bold one is thickened for bold text. Code points a game font lacks fall back to DejaVu. |
 | `premultiplied` | false | `image()` in premultiplied alpha (blend `src + dst * (1 - a)`). |
@@ -239,6 +240,14 @@ game. Without CMake, generate the two sources with
 (and the same for `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`), or define `RECOMP_ACH_NO_EMBEDDED_FONTS=1` and
 pass `OverlayOptions::font` (CMake: `-DRECOMP_ACH_EMBED_FONTS=OFF`); with neither, nothing is drawn. The text is rasterised with stb_truetype, compiled `static` into the SDK so it
 never clashes with a game's own copy (or ImGui's).
+
+## Host apps
+
+An app that shows the viewer for data it didn't make (the [desktop app](app.md)) can add its own
+button beside the title with `SetHostButton(label, hint, on_press)`: clicking it, or Start / F2 when
+the settings page is off, calls `on_press` from inside `Frame()`. `viewer_parts.h` has the viewer's
+colours for a style (`ResolveViewerTheme`) and its button and key hints (`HintPainter`), so screens
+drawn around the viewer match it.
 
 ## Building blocks
 

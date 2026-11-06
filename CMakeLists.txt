@@ -32,9 +32,19 @@ set(RECOMP_ACH_REXGLUE_TARGET "" CACHE STRING "rexglue runtime target for the Xb
 # Whether that rexglue has patches/rexglue-achievements.patch. Off: stock
 # rexglue, and the recomp shims XAM itself through RexglueBinding::xam().
 option(RECOMP_ACH_REXGLUE_PATCHED "rexglue includes patches/rexglue-achievements.patch" ON)
+# The desktop app that shows every game's library entry (docs/app.md). Needs
+# SDL3: RECOMP_ACH_SDL3_TARGET, a source tree in RECOMP_ACH_SDL3_SOURCE_DIR,
+# or an installed SDL3 (find_package).
+option(RECOMP_ACH_APP "Build the recomp-achievements desktop app (needs SDL3)" OFF)
+set(RECOMP_ACH_SDL3_SOURCE_DIR "" CACHE PATH "SDL3 source tree to build the app against")
 
 include(cmake/core.cmake)
+include(cmake/sdl3.cmake)
 include(cmake/ui.cmake)
 include(cmake/sources.cmake)
 include(cmake/memory.cmake)
 include(cmake/rexglue.cmake)
+if(RECOMP_ACH_APP)
+  add_subdirectory(tools/demo_library)
+  add_subdirectory(apps/achievements)
+endif()

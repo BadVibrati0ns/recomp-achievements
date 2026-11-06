@@ -71,6 +71,10 @@ struct LibraryOptions {
   std::chrono::milliseconds poll_interval{250};
   // events.log is renamed to events-<unix ms>.log past this size (0: never).
   uint64_t rotate_bytes = 4u << 20;
+  // Unix milliseconds for event times, snapshots and last_played; null = the
+  // system clock. For tests and tools that make demo data. Called from the
+  // game thread and the worker.
+  std::function<uint64_t()> clock;
 };
 
 class Library {

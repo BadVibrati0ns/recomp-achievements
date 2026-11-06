@@ -77,15 +77,6 @@ Color WithAlpha(Color c, float a) {
   return c;
 }
 
-Color Mix(const Color& a, const Color& b, float t) {
-  return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t};
-}
-
-float Luma(const Color& c) { return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b; }
-
-// Text colour that reads on top of c.
-Color OnColor(const Color& c) { return Luma(c) > 0.55f ? Color::Rgba(16, 16, 18) : Color::Rgba(255, 255, 255); }
-
 std::string FormatTime(uint64_t unix_seconds) {
   if (!unix_seconds) return {};
   const std::time_t t = static_cast<std::time_t>(unix_seconds);
@@ -149,6 +140,23 @@ enum class Device { kKeyboard, kPad };
 
 // What a hint glyph stands for.
 enum class Action { kDetails, kBack, kFilter, kSecrets, kPrevSet, kNextSet, kCredits, kMove, kSettings, kAdjust };
+
+// The controller glyph and key cap for each.
+std::pair<PadGlyph, const char*> GlyphFor(Action a) {
+  switch (a) {
+    case Action::kDetails: return {PadGlyph::kA, "Enter"};
+    case Action::kBack: return {PadGlyph::kB, "Esc"};
+    case Action::kFilter: return {PadGlyph::kX, "Tab"};
+    case Action::kSecrets: return {PadGlyph::kY, "Space"};
+    case Action::kPrevSet: return {PadGlyph::kLB, "\xE2\x86\x90"};  // ←
+    case Action::kNextSet: return {PadGlyph::kRB, "\xE2\x86\x92"};  // →
+    case Action::kCredits: return {PadGlyph::kBack, "F1"};
+    case Action::kMove: return {PadGlyph::kDpad, "\xE2\x86\x91\xE2\x86\x93"};  // ↑↓
+    case Action::kSettings: return {PadGlyph::kStart, "F2"};
+    case Action::kAdjust: return {PadGlyph::kDpadHorizontal, "\xE2\x86\x90\xE2\x86\x92"};  // ←→
+  }
+  return {PadGlyph::kA, ""};
+}
 
 // Reset rows and the reset mode's hold bar.
 const Color kDanger = Color::Rgba(222, 76, 66);
@@ -251,6 +259,7 @@ struct Overlay::Impl {
     std::string key;  // Kept as a copy: view's pointers die with their set.
     AchievementView view;
     bool hidden = false, unlocked = false;
+    bool off = false;  // Its set is turned off (show_disabled_sets).
     std::string name, description, time, points;
     std::vector<std::string> lines;  // Description, wrapped for the current state.
     bool expandable = false;
@@ -274,8 +283,7 @@ struct Overlay::Impl {
     float tabs_y = 0, tab_h = 0, filter_y = 0, filter_h = 0, footer_y = 0;
     float icon = 0, row_pad = 0, name = 0, desc = 0, meta = 0, line_gap = 0, right_w = 0, text_x = 0, text_w = 0;
   };
-  struct Theme {
-    Color backdrop, panel, accent, text, subtext, track, border, row, row_selected;
+  struct Theme : ViewerTheme {
     const Style* style = nullptr;
   };
 
@@ -359,7 +367,9 @@ struct Overlay::Impl {
   bool model_stale = true;
   uint64_t model_generation = 0, model_serial = 0, model_style_generation = 0;
   float model_scale = 0, model_width = 0;
-  std::vector<const AchievementSet*> sets;
+  std::vector<const AchievementSet*> sets;    // Turned on.
+  std::vector<const AchievementSet*> listed;  // In the tabs: sets, or all with show_disabled_sets.
+  std::vector<bool> tab_off;                  // Per tab: a set that's off.
   std::vector<std::string> tab_ids;  // "" = all.
   std::vector<std::string> tab_titles;
   std::vector<Entry> entries;
@@ -395,6 +405,10 @@ struct Overlay::Impl {
   RectF filter_hits[3];
   RectF secrets_hit;
   RectF gear_hit;
+  // SetHostButton(): the host app's button beside the title.
+  std::string host_label, host_hint;
+  std::function<void()> host_fn;
+  RectF host_hit;
   float icon_poll = 0;
   std::vector<void*> drawn_icons;
   std::vector<int> drawn_rows;
@@ -498,15 +512,24 @@ struct Overlay::Impl {
   float BaseScale() const { return ui_scale > 0 ? ui_scale : height / 1080.0f; }
 
   const AchievementSet* TabSet() const {
-    if (sets.empty()) return all_sets.empty() ? nullptr : all_sets.front();
+    if (listed.empty()) return all_sets.empty() ? nullptr : all_sets.front();
     if (!settings_screen && tab < tab_ids.size() && !tab_ids[tab].empty())
-      for (auto* s : sets)
+      for (auto* s : listed)
         if (s->id == tab_ids[tab]) return s;
-    return sets.front();
+    return listed.front();
   }
 
   bool SettingsAvailable() const {
     return options.show_settings && (options.settings_sound || options.settings_sets || options.settings_reset);
+  }
+
+  // Start / F2 press the host button when there's no settings page to open.
+  bool HostKeys() const { return host_fn && !host_label.empty() && !SettingsAvailable(); }
+
+  void PressHost() {
+    auto fn = host_fn;  // It may replace the button.
+    if (fn) fn();
+    viewer_dirty = true;
   }
 
   // The tab's set id; "" for all sets (and on the settings page).
@@ -517,22 +540,9 @@ struct Overlay::Impl {
   std::shared_ptr<const Style> ChromeStyle() const { return styles->Resolve(TabSet()); }
 
   Theme MakeTheme(const Style& st) const {
-    const ui::ViewerStyle& v = st.viewer;
     Theme t;
+    static_cast<ViewerTheme&>(t) = ResolveViewerTheme(st);
     t.style = &st;
-    t.backdrop = v.backdrop.value_or(Color::Rgba(0, 0, 0, 165));
-    // Opaque: a see-through panel lets the game's edges ghost through the text.
-    Color panel = st.unlock.colors.background;
-    panel.a = 1.0f;
-    t.panel = v.panel.value_or(panel);
-    t.accent = v.accent.value_or(st.progress.colors.bar_fill);
-    t.text = v.text.value_or(st.unlock.colors.name);
-    t.subtext = v.subtext.value_or(st.unlock.colors.description);
-    t.track = st.progress.colors.bar_track;
-    t.border = WithAlpha(t.text, 0.10f);
-    t.row = Mix(t.panel, t.text, 0.045f);
-    t.row_selected = Mix(t.panel, t.accent, 0.20f);
-    t.row.a = t.row_selected.a = 1.0f;
     return t;
   }
 
@@ -575,18 +585,24 @@ struct Overlay::Impl {
     // Sets that are off leave the tabs, "All" and the totals.
     sets = system.enabled_sets();
     all_sets = system.sets();
+    listed = options.show_disabled_sets ? all_sets : sets;
+    auto is_on = [&](const AchievementSet* set) { return std::find(sets.begin(), sets.end(), set) != sets.end(); };
     sound = GetPopupSoundSettings(system);
     // Keep the tab on the same set across rebuilds.
     const std::string cur_tab = tab < tab_ids.size() ? tab_ids[tab] : std::string();
     tab_ids.clear();
     tab_titles.clear();
-    if (sets.size() > 1) {
+    tab_off.clear();
+    if (listed.size() > 1) {
       tab_ids.push_back("");
       tab_titles.push_back("All");
+      tab_off.push_back(false);
     }
-    for (auto* s : sets) {
+    for (auto* s : listed) {
+      const bool off = !is_on(s);
       tab_ids.push_back(s->id);
-      tab_titles.push_back(s->title.empty() ? s->id : s->title);
+      tab_titles.push_back((s->title.empty() ? s->id : s->title) + (off ? "  \xC2\xB7  Off" : ""));
+      tab_off.push_back(off);
     }
     tab = 0;
     for (size_t i = 0; i < tab_ids.size(); ++i)
@@ -598,20 +614,24 @@ struct Overlay::Impl {
     totals = system.GetTotals(scope);
     entries.clear();
     rows.clear();
-    const auto views = system.Snapshot();
+    const auto views = system.Snapshot(options.show_disabled_sets);
     float y = 0;
-    const bool all = scope.empty() && sets.size() > 1;
-    for (const AchievementSet* set : sets) {
+    const bool all = scope.empty() && listed.size() > 1;
+    for (const AchievementSet* set : listed) {
       if (!scope.empty() && set->id != scope) continue;
-      if (all) {
+      const bool off = !is_on(set);
+      if (all || off) {
         Entry e;
         e.kind = Entry::kSet;
+        e.off = off;
         e.title = set->title.empty() ? set->id : set->title;
         const auto t = system.GetTotals(set->id);
         e.detail = std::to_string(t.unlocked) + " / " + std::to_string(t.count);
         if (t.points)
           e.detail += "   " + std::to_string(t.unlocked_points) + " / " + std::to_string(t.points) +
                       PointsSuffix(set->platform);
+        // Read-only here: the game's settings page turns it on.
+        if (off) e.detail = "Off, not counted  \xC2\xB7  " + e.detail;
         e.y = y;
         e.h = 54.0f * m.s;
         y += e.h;
@@ -644,6 +664,7 @@ struct Overlay::Impl {
         }
         for (const AchievementView* v : list) {
           Entry e = MakeRow(*v, *set, *st, m);
+          e.off = off;
           e.y = y;
           y += e.h + 8.0f * m.s;
           rows.push_back(static_cast<int>(entries.size()));
@@ -736,8 +757,8 @@ struct Overlay::Impl {
     };
     const std::string scope = Scope();
     add("Credits", 26.0f * m.s, true, false);
-    const auto views = system.Snapshot();
-    for (const AchievementSet* set : sets) {
+    const auto views = system.Snapshot(options.show_disabled_sets);
+    for (const AchievementSet* set : listed) {
       if (!scope.empty() && set->id != scope) continue;
       add(set->title.empty() ? set->id : set->title, 20.0f * m.s, true, false, 18.0f * m.s);
       if (set->credits.empty()) add("No credits listed for this set.", 16.0f * m.s, false, true);
@@ -1252,6 +1273,10 @@ struct Overlay::Impl {
       ShowSettings(!settings_screen, m);
       return;
     }
+    if (HostKeys() && ((pd & kPadStart) || (f_down & 4u))) {
+      PressHost();
+      return;
+    }
     if (settings_screen) {
       HandleSettingsInput(dt, in, m, pd, kd, ph, kh, mouse_moved, mouse_click);
       return;
@@ -1359,6 +1384,10 @@ struct Overlay::Impl {
       if (mouse_click) {
         if (inside(gear_hit)) {
           ShowSettings(true, m);
+          return;
+        }
+        if (host_fn && inside(host_hit)) {
+          PressHost();
           return;
         }
         for (const auto& [r, t] : tab_hits)
@@ -1511,119 +1540,21 @@ struct Overlay::Impl {
     canvas.Text(b ? *font_bold : *font, size, x, y, t, c);
   }
 
+  HintPainter Hints(float s, const Theme& th, float alpha) {
+    return {canvas, *font, *font_bold, s, labels, device == Device::kKeyboard, th.text, th.subtext, alpha};
+  }
+
   // A button or key glyph centred vertically on cy; returns its width.
   float DrawGlyph(Action a, float x, float cy, float s, const Theme& th, float alpha, bool draw = true) {
-    const float d = 26.0f * s;  // Face button diameter.
-    const float r = d * 0.5f;
-    if (device == Device::kKeyboard) {
-      const char* label = "";
-      switch (a) {
-        case Action::kDetails: label = "Enter"; break;
-        case Action::kBack: label = "Esc"; break;
-        case Action::kFilter: label = "Tab"; break;
-        case Action::kSecrets: label = "Space"; break;
-        case Action::kPrevSet: label = "\xE2\x86\x90"; break;  // ←
-        case Action::kNextSet: label = "\xE2\x86\x92"; break;  // →
-        case Action::kCredits: label = "F1"; break;
-        case Action::kMove: label = "\xE2\x86\x91\xE2\x86\x93"; break;  // ↑↓
-        case Action::kSettings: label = "F2"; break;
-        case Action::kAdjust: label = "\xE2\x86\x90\xE2\x86\x92"; break;  // ←→
-      }
-      const float ts = 14.0f * s;
-      const float w = std::max(d, TextW(true, ts, label) + 14.0f * s);
-      if (draw) {
-        const RectF k{x, cy - r, x + w, cy + r};
-        canvas.FillRect(k, WithAlpha(th.text, 0.10f * alpha), 5.0f * s);
-        canvas.StrokeRect(k, WithAlpha(th.text, 0.45f * alpha), 5.0f * s, 1.25f * s);
-        DrawText(true, ts, x + (w - TextW(true, ts, label)) * 0.5f, cy - ts * 0.5f, label, WithAlpha(th.text, alpha));
-      }
-      return w;
-    }
-    const bool ps = labels == ButtonLabels::kPlayStation;
-    auto shoulder = [&](const char* label) {
-      const float ts = 13.0f * s;
-      const float w = std::max(d * 1.5f, TextW(true, ts, label) + 14.0f * s);
-      if (draw) {
-        const RectF k{x, cy - r * 0.85f, x + w, cy + r * 0.85f};
-        canvas.FillRect(k, WithAlpha(th.text, 0.12f * alpha), r * 0.6f);
-        canvas.StrokeRect(k, WithAlpha(th.text, 0.5f * alpha), r * 0.6f, 1.25f * s);
-        DrawText(true, ts, x + (w - TextW(true, ts, label)) * 0.5f, cy - ts * 0.5f, label, WithAlpha(th.text, alpha));
-      }
-      return w;
-    };
-    auto face = [&](int which) {  // 0 a/cross, 1 b/circle, 2 x/square, 3 y/triangle
-      if (!draw) return d;
-      const float cx = x + r;
-      if (!ps) {
-        static const Color kColors[4] = {Color::Rgba(92, 176, 54), Color::Rgba(214, 58, 46),
-                                         Color::Rgba(40, 112, 214), Color::Rgba(236, 178, 22)};
-        static const char* kLetters[4] = {"A", "B", "X", "Y"};
-        canvas.FillCircle(cx, cy, r, WithAlpha(kColors[which], alpha));
-        const float ts = 16.0f * s;
-        DrawText(true, ts, cx - TextW(true, ts, kLetters[which]) * 0.5f, cy - ts * 0.5f, kLetters[which],
-                 WithAlpha(Color::Rgba(255, 255, 255), alpha));
-        return d;
-      }
-      static const Color kColors[4] = {Color::Rgba(124, 168, 228), Color::Rgba(232, 96, 92),
-                                       Color::Rgba(222, 142, 200), Color::Rgba(64, 196, 164)};
-      canvas.FillCircle(cx, cy, r, WithAlpha(Color::Rgba(28, 28, 32), alpha));
-      canvas.StrokeCircle(cx, cy, r - 0.75f * s, 1.5f * s, WithAlpha(th.text, 0.35f * alpha));
-      const Color c = WithAlpha(kColors[which], alpha);
-      const float k = r * 0.42f, t = 2.2f * s;
-      switch (which) {
-        case 0:
-          canvas.Line(cx - k, cy - k, cx + k, cy + k, t, c);
-          canvas.Line(cx - k, cy + k, cx + k, cy - k, t, c);
-          break;
-        case 1: canvas.StrokeCircle(cx, cy, k, t, c); break;
-        case 2: canvas.StrokeRect({cx - k * 0.9f, cy - k * 0.9f, cx + k * 0.9f, cy + k * 0.9f}, c, 0, t); break;
-        default: {
-          const Vec2 p0{cx, cy - k * 1.05f}, p1{cx + k * 1.05f, cy + k * 0.75f}, p2{cx - k * 1.05f, cy + k * 0.75f};
-          canvas.Line(p0.x, p0.y, p1.x, p1.y, t, c);
-          canvas.Line(p1.x, p1.y, p2.x, p2.y, t, c);
-          canvas.Line(p2.x, p2.y, p0.x, p0.y, t, c);
-        }
-      }
-      return d;
-    };
-    switch (a) {
-      case Action::kDetails: return face(0);
-      case Action::kBack: return face(1);
-      case Action::kFilter: return face(2);
-      case Action::kSecrets: return face(3);
-      case Action::kPrevSet: return shoulder(ps ? "L1" : "LB");
-      case Action::kNextSet: return shoulder(ps ? "R1" : "RB");
-      case Action::kCredits: return shoulder(ps ? "SELECT" : "BACK");
-      case Action::kSettings: return shoulder(ps ? "OPTIONS" : "START");
-      case Action::kAdjust: {
-        // The d-pad with its left and right arms lit.
-        if (draw) {
-          const float cx = x + r, w = r * 0.36f;
-          canvas.FillRect({cx - w, cy - r, cx + w, cy + r}, WithAlpha(th.text, 0.3f * alpha), w * 0.5f);
-          canvas.FillRect({cx - r, cy - w, cx + r, cy + w}, WithAlpha(th.text, 0.85f * alpha), w * 0.5f);
-        }
-        return d;
-      }
-      case Action::kMove: {
-        // A d-pad cross.
-        if (draw) {
-          const float cx = x + r, w = r * 0.36f;
-          canvas.FillRect({cx - w, cy - r, cx + w, cy + r}, WithAlpha(th.text, 0.8f * alpha), w * 0.5f);
-          canvas.FillRect({cx - r, cy - w, cx + r, cy + w}, WithAlpha(th.text, 0.8f * alpha), w * 0.5f);
-        }
-        return d;
-      }
-    }
-    return d;
+    const auto [pad, key] = GlyphFor(a);
+    return Hints(s, th, alpha).Glyph(pad, key, x, cy, draw);
   }
 
   // Glyph then label; returns the total width.
   float DrawHint(Action a, const char* label, float x, float cy, float s, const Theme& th, float alpha,
                  bool draw = true) {
-    const float gw = DrawGlyph(a, x, cy, s, th, alpha, draw);
-    const float ts = 15.0f * s;
-    if (draw) DrawText(false, ts, x + gw + 8.0f * s, cy - ts * 0.5f, label, WithAlpha(th.subtext, alpha));
-    return gw + 8.0f * s + TextW(false, ts, label);
+    const auto [pad, key] = GlyphFor(a);
+    return Hints(s, th, alpha).Hint(pad, key, label, x, cy, draw);
   }
 
   void DrawIconTile(const Entry& e, RectF r, const Theme& th, float alpha, float s) {
@@ -1649,7 +1580,7 @@ struct Overlay::Impl {
       const float k = dim ? 0.43f : 1.0f;
       canvas.DrawImage(*static_cast<const CanvasImage*>(tex), r, Color{k, k, k, alpha}, rad);
     } else {
-      const Color tile = e.unlocked ? Mix(th.panel, th.accent, 0.35f) : Mix(th.panel, th.text, 0.08f);
+      const Color tile = e.unlocked ? MixColor(th.panel, th.accent, 0.35f) : MixColor(th.panel, th.text, 0.08f);
       canvas.FillRect(r, WithAlpha(tile, alpha), rad);
       CanvasPainter p(canvas, font.get(), font_bold.get());
       const Color col = e.unlocked ? th.text : WithAlpha(th.text, 0.45f);
@@ -1665,15 +1596,13 @@ struct Overlay::Impl {
     }
   }
 
-  void DrawCheck(float cx, float cy, float k, float t, const Color& c) {
-    canvas.Line(cx - k, cy, cx - k * 0.3f, cy + k * 0.7f, t, c);
-    canvas.Line(cx - k * 0.3f, cy + k * 0.7f, cx + k, cy - k * 0.6f, t, c);
-  }
+  void DrawCheck(float cx, float cy, float k, float t, const Color& c) { DrawCheckMark(canvas, cx, cy, k, t, c); }
 
   void DrawRow(const Entry& e, float y, bool sel, const Metrics& m, const Theme& th, float alpha) {
     const float s = m.s;
+    if (e.off) alpha *= 0.5f;
     const RectF r{m.list.x0, y, m.list.x1, y + e.h};
-    const Color sel_fill = reset_mode ? Mix(th.panel, kDanger, 0.14f) : th.row_selected;
+    const Color sel_fill = reset_mode ? MixColor(th.panel, kDanger, 0.14f) : th.row_selected;
     canvas.FillRect(r, WithAlpha(sel ? sel_fill : th.row, alpha), 10.0f * s);
     if (sel) canvas.StrokeRect(r, WithAlpha(reset_mode ? kDanger : th.accent, 0.85f * alpha), 10.0f * s, 2.0f * s);
     const float ix = r.x0 + m.row_pad, iy = y + m.row_pad;
@@ -1823,7 +1752,7 @@ struct Overlay::Impl {
   void DrawSwitch(bool on, float rx, float cy, float s, const Theme& th, float alpha) {
     const float w = 52.0f * s, h = 28.0f * s;
     const RectF r{rx - w, cy - h * 0.5f, rx, cy + h * 0.5f};
-    canvas.FillRect(r, on ? WithAlpha(th.accent, alpha) : WithAlpha(Mix(th.panel, th.text, 0.18f), alpha), h * 0.5f);
+    canvas.FillRect(r, on ? WithAlpha(th.accent, alpha) : WithAlpha(MixColor(th.panel, th.text, 0.18f), alpha), h * 0.5f);
     const float kr = h * 0.5f - 3.5f * s;
     const float kx = on ? r.x1 - h * 0.5f : r.x0 + h * 0.5f;
     canvas.FillCircle(kx, cy, kr, WithAlpha(on ? OnColor(th.accent) : th.text, alpha * (on ? 1.0f : 0.75f)));
@@ -1851,7 +1780,7 @@ struct Overlay::Impl {
     const bool reset = row.kind == SettingRow::kResetSet || row.kind == SettingRow::kResetAll;
     const RectF r{L.x0, y, L.x1, y + row.h};
     // Reset rows select in red, so the accent never reads as "go ahead".
-    const Color sel_fill = reset ? Mix(th.panel, kDanger, 0.14f) : th.row_selected;
+    const Color sel_fill = reset ? MixColor(th.panel, kDanger, 0.14f) : th.row_selected;
     canvas.FillRect(r, WithAlpha(sel ? sel_fill : th.row, alpha), 10.0f * s);
     if (sel) canvas.StrokeRect(r, WithAlpha(reset ? kDanger : th.accent, 0.85f * alpha), 10.0f * s, 2.0f * s);
     if (reset) DrawHoldFill(r, HoldFraction(row.id), s, alpha);
@@ -1859,13 +1788,13 @@ struct Overlay::Impl {
     // A coloured bar on the left: accent for sets that are on, red for resets.
     const bool dim = (row.kind == SettingRow::kSet && !row.on) || (row.kind == SettingRow::kVolume && !sound.enabled);
     if (row.kind == SettingRow::kSet || reset) {
-      const Color bar = reset ? kDanger : row.on ? th.accent : Mix(th.panel, th.text, 0.2f);
+      const Color bar = reset ? kDanger : row.on ? th.accent : MixColor(th.panel, th.text, 0.2f);
       canvas.FillRect({r.x0 + 8.0f * s, r.y0 + 14.0f * s, r.x0 + 12.0f * s, r.y1 - 14.0f * s}, WithAlpha(bar, alpha),
                       2.0f * s);
     }
     const float tx = r.x0 + m.row_pad + 12.0f * s;
     const float ty = y + (row.h - (m.name + m.line_gap + m.desc)) * 0.5f;
-    const Color title = reset ? Mix(th.text, kDanger, 0.35f) : th.text;
+    const Color title = reset ? MixColor(th.text, kDanger, 0.35f) : th.text;
     DrawText(true, m.name, tx, ty, Canvas::EllipsizeText(*font_bold, m.name, row.title, r.width() * 0.55f),
              WithAlpha(title, alpha * (dim ? 0.6f : 1.0f)));
     DrawText(false, m.desc, tx, ty + m.name + m.line_gap, row.detail, WithAlpha(th.subtext, alpha * (dim ? 0.7f : 0.9f)));
@@ -1939,22 +1868,45 @@ struct Overlay::Impl {
     // Header: title, totals and an overall bar.
     const float hx0 = P.x0 + m.pad, hx1 = P.x1 - m.pad;
     const float hy = P.y0 + m.pad;
-    DrawText(true, m.title, hx0, hy, options.title, WithAlpha(th.text, ease));
+    // Long titles (a host app's game title) leave room for the totals.
+    const std::string title = Canvas::EllipsizeText(*font_bold, m.title, options.title, (hx1 - hx0) * 0.5f);
+    DrawText(true, m.title, hx0, hy, title, WithAlpha(th.text, ease));
     gear_hit = {};
+    host_hit = {};
+    float button_x = hx0 + TextW(true, m.title, title) + 18.0f * s;
     if (SettingsAvailable()) {
       // A settings button beside the title, for the mouse; lit while open.
       const float bh = 32.0f * s, ts = 15.0f * s, gr = 9.0f * s;
       const char* label = "Settings";
-      const float bx = hx0 + TextW(true, m.title, options.title) + 18.0f * s;
+      const float bx = button_x;
       const float bw = 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s;
       const float by = hy + (m.title - bh) * 0.5f + 2.0f * s;
       const RectF b{bx, by, bx + bw, by + bh};
-      const Color fill = settings_screen ? th.accent : Mix(th.panel, th.text, 0.09f);
+      const Color fill = settings_screen ? th.accent : MixColor(th.panel, th.text, 0.09f);
       const Color ink = settings_screen ? OnColor(th.accent) : th.subtext;
       canvas.FillRect(b, WithAlpha(fill, ease), bh * 0.5f);
       DrawGear(bx + 12.0f * s + gr, by + bh * 0.5f, gr, WithAlpha(ink, ease), WithAlpha(fill, ease));
       DrawText(true, ts, bx + 12.0f * s + gr * 2 + 8.0f * s, by + (bh - ts) * 0.5f, label, WithAlpha(ink, ease));
       gear_hit = b;
+      button_x = b.x1 + 10.0f * s;
+    }
+    if (host_fn && !host_label.empty()) {
+      // The host's button: a person glyph and its label, like Settings.
+      const float bh = 32.0f * s, ts = 15.0f * s, gr = 8.0f * s;
+      const float bx = button_x;
+      const std::string label = Canvas::EllipsizeText(*font_bold, ts, host_label, 260.0f * s);
+      const float bw = 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s;
+      const float by = hy + (m.title - bh) * 0.5f + 2.0f * s;
+      const RectF b{bx, by, bx + bw, by + bh};
+      const Color fill = MixColor(th.panel, th.text, 0.09f);
+      canvas.FillRect(b, WithAlpha(fill, ease), bh * 0.5f);
+      const float cx = bx + 12.0f * s + gr, cy = by + bh * 0.5f;
+      canvas.FillCircle(cx, cy - gr * 0.38f, gr * 0.42f, WithAlpha(th.subtext, ease));
+      canvas.PushClip(RectF{cx - gr, cy - gr, cx + gr, cy + gr * 0.9f});
+      canvas.FillCircle(cx, cy + gr * 0.95f, gr * 0.8f, WithAlpha(th.subtext, ease));
+      canvas.PopClip();
+      DrawText(true, ts, bx + 12.0f * s + gr * 2 + 8.0f * s, by + (bh - ts) * 0.5f, label, WithAlpha(th.subtext, ease));
+      host_hit = b;
     }
     {
       const std::string count = std::to_string(totals.unlocked) + " / " + std::to_string(totals.count);
@@ -1962,7 +1914,12 @@ struct Overlay::Impl {
       std::string pts;
       if (totals.points) {
         const AchievementSet* ts = TabSet();
-        const bool xbox = ts && tab_ids.size() && !tab_ids[tab].empty() && ts->platform == Platform::kXbox360;
+        // "All" says G too when every set counted is an Xbox 360 one.
+        const bool all_tab = tab_ids.empty() || tab_ids[tab].empty();
+        const bool xbox = all_tab ? !sets.empty() && std::all_of(sets.begin(), sets.end(), [](const AchievementSet* x) {
+          return x->platform == Platform::kXbox360;
+        })
+                                  : ts && ts->platform == Platform::kXbox360;
         pts = std::to_string(totals.unlocked_points) + " / " + std::to_string(totals.points) + (xbox ? "G" : " pts");
       }
       float x = hx1;
@@ -2017,10 +1974,12 @@ struct Overlay::Impl {
       for (size_t i = 0; i < tab_titles.size(); ++i) {
         const RectF r{x, ty, x + widths[i], ty + th_};
         const bool cur = i == tab;
-        canvas.FillRect(r, cur ? WithAlpha(th.accent, ease) : WithAlpha(th.text, 0.07f * ease), th_ * 0.5f);
+        const Color lit = i < tab_off.size() && tab_off[i] ? MixColor(th.accent, th.panel, 0.45f) : th.accent;
+        canvas.FillRect(r, cur ? WithAlpha(lit, ease) : WithAlpha(th.text, 0.07f * ease), th_ * 0.5f);
         const std::string label = Canvas::EllipsizeText(*font_bold, ts, tab_titles[i], 320.0f * s);
+        const bool off = i < tab_off.size() && tab_off[i];
         DrawText(true, ts, x + 18.0f * s, ty + (th_ - ts) * 0.5f, label,
-                 cur ? WithAlpha(OnColor(th.accent), ease) : WithAlpha(th.subtext, ease));
+                 cur ? WithAlpha(OnColor(th.accent), ease) : WithAlpha(th.subtext, ease * (off ? 0.55f : 1.0f)));
         tab_hits.push_back({RectF{std::max(r.x0, x0), r.y0, std::min(r.x1, x1), r.y1}, i});
         x += widths[i] + 8.0f * s;
       }
@@ -2043,7 +2002,7 @@ struct Overlay::Impl {
           filter_hits[i] = r;
           if (i == filter)
             canvas.FillRect({r.x0 + 3.0f * s, r.y0 + 3.0f * s, r.x1 - 3.0f * s, r.y1 - 3.0f * s},
-                            WithAlpha(Mix(th.panel, th.text, 0.22f), ease), (fh - 6.0f * s) * 0.5f);
+                            WithAlpha(MixColor(th.panel, th.text, 0.22f), ease), (fh - 6.0f * s) * 0.5f);
           DrawText(true, fs, x + 16.0f * s, fy + (fh - fs) * 0.5f, kNames[i],
                    WithAlpha(i == filter ? th.text : th.subtext, ease));
           x += seg[i];
@@ -2059,7 +2018,7 @@ struct Overlay::Impl {
           canvas.StrokeRect(pill, WithAlpha(kDanger, 0.9f * ease), fh * 0.5f, 1.5f * s);
           canvas.FillCircle(pill.x0 + 18.0f * s, fy + fh * 0.5f, 5.0f * s, WithAlpha(kDanger, ease));
           DrawText(true, ls, pill.x0 + 32.0f * s, fy + (fh - ls) * 0.5f, label,
-                   WithAlpha(Mix(th.text, kDanger, 0.3f), ease));
+                   WithAlpha(MixColor(th.text, kDanger, 0.3f), ease));
         } else if (options.allow_reveal_secrets) {
           const char* label = "Show secrets";
           const float bw = 20.0f * s;
@@ -2125,7 +2084,7 @@ struct Overlay::Impl {
         if (e.kind == Entry::kSet) {
           const float ts = 22.0f * s;
           const float yy = y + 14.0f * s;
-          DrawText(true, ts, L.x0 + 4.0f * s, yy, e.title, WithAlpha(th.text, ease));
+          DrawText(true, ts, L.x0 + 4.0f * s, yy, e.title, WithAlpha(th.text, ease * (e.off ? 0.6f : 1.0f)));
           const float ds = 15.0f * s;
           DrawText(false, ds, L.x1 - 4.0f * s - TextW(false, ds, e.detail), yy + (ts - ds) * 0.6f, e.detail,
                    WithAlpha(th.subtext, ease));
@@ -2195,6 +2154,7 @@ struct Overlay::Impl {
         x += DrawHint(Action::kDetails, "Details", x, fy, s, th, ease) + gap;
       if (options.show_credits) x += DrawHint(Action::kCredits, "Credits", x, fy, s, th, ease) + gap;
       if (SettingsAvailable()) DrawHint(Action::kSettings, "Settings", x, fy, s, th, ease);
+      else if (HostKeys()) DrawHint(Action::kSettings, host_hint.empty() ? host_label.c_str() : host_hint.c_str(), x, fy, s, th, ease);
     }
     const float bw = DrawHint(Action::kBack, back, 0, fy, s, th, ease, false);
     DrawHint(Action::kBack, back, hx1 - bw, fy, s, th, ease);
@@ -2463,6 +2423,14 @@ void Overlay::SetButtonLabels(ButtonLabels labels) {
   impl_->viewer_dirty = true;
 }
 
+void Overlay::SetHostButton(std::string label, std::string hint, std::function<void()> on_press) {
+  Impl& m = *impl_;
+  m.host_label = std::move(label);
+  m.host_hint = std::move(hint);
+  m.host_fn = std::move(on_press);
+  m.viewer_dirty = true;
+}
+
 void Overlay::RegisterFont(std::string name, std::shared_ptr<Font> font) {
   impl_->named_fonts[std::move(name)] = std::move(font);
 }
@@ -2501,6 +2469,7 @@ Overlay::ViewState Overlay::view_state() const {
   for (int i : m.setting_items) v.setting_rows.push_back(m.setting_rows[i].id);
   v.setting_selected = m.setting_sel_id;
   v.hold = m.hold_id.empty() ? 0.0f : m.HoldFraction(m.hold_id);
+  v.host_button = m.host_fn ? m.host_label : std::string();
   return v;
 }
 

@@ -32,8 +32,6 @@ std::span<const uint8_t> Bytes(const std::string& s) {
   return {reinterpret_cast<const uint8_t*>(s.data()), s.size()};
 }
 
-uint64_t UnixSeconds() { return static_cast<uint64_t>(std::time(nullptr)); }
-
 json TotalsJson(const LibraryTotals& t) {
   return {{"count", t.count}, {"unlocked", t.unlocked}, {"points", t.points}, {"unlocked_points", t.unlocked_points}};
 }
@@ -72,6 +70,9 @@ struct Library::Impl {
   bool hash_profiles = false;
   fs::path root, dir;
   std::string game_id, install_id;
+
+  uint64_t NowMs() const { return options.clock ? options.clock() : detail::UnixMillis(); }
+  uint64_t UnixSeconds() const { return NowMs() / 1000; }
 
   std::shared_ptr<Shared> shared = std::make_shared<Shared>();
   std::thread worker;
@@ -200,8 +201,8 @@ struct Library::Impl {
   // ---- Listeners (game thread) -------------------------------------------------
 
   void Install() {
-    auto queue = [shared = shared, sys = &system](LibraryEvent e) {
-      e.t = detail::UnixMillis();
+    auto queue = [shared = shared, sys = &system, clock = options.clock](LibraryEvent e) {
+      e.t = clock ? clock() : detail::UnixMillis();
       e.profile = sys->active_profile();
       {
         std::lock_guard lock(shared->mutex);
@@ -316,7 +317,7 @@ struct Library::Impl {
   // Resets and set toggles have no listener; they show up as differences
   // from the last state seen.
   void Observe(const System::State& state, std::vector<LibraryEvent>& events) {
-    const uint64_t now = detail::UnixMillis();
+    const uint64_t now = NowMs();
     for (const auto& s : state.sets) {
       const std::string& id = s.set->id;
       const auto known = set_enabled.find(id);
@@ -369,7 +370,7 @@ struct Library::Impl {
     if (options.rotate_bytes > 0) {
       const auto size = fs::file_size(log, ec);
       if (!ec && size >= options.rotate_bytes) {
-        const std::string stem = "events-" + std::to_string(detail::UnixMillis());
+        const std::string stem = "events-" + std::to_string(NowMs());
         fs::path target = dir / (stem + ".log");
         for (int i = 1; fs::exists(target, ec); ++i) target = dir / (stem + "-" + std::to_string(i) + ".log");
         fs::rename(log, target, ec);

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -102,6 +103,14 @@ class System {
   // reloads that profile's progress. With no storage, progress is in memory.
   void SetStorage(std::filesystem::path dir, ProfileProvider profile = nullptr);
   void ReloadProgress();
+  // Replaces the active profile's progress in memory (by achievement key) and
+  // makes `profile` active, without saving or calling listeners. For
+  // read-only mirrors of progress kept elsewhere, such as the library app;
+  // games use SetStorage(). Without storage nothing is ever written.
+  void LoadProgress(const std::map<std::string, Progress>& progress, std::string profile = "default");
+  // Unix seconds for unlock times; null goes back to the system clock. For
+  // tests and tools that make demo data.
+  void SetClock(std::function<uint64_t()> clock);
   std::string active_profile() const;
   // Increases whenever sets are added, replaced, removed, cleared or turned
   // on or off, progress is reset or reloaded, a setting changes, or the

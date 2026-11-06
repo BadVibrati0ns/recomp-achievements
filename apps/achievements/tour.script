@@ -1,0 +1,75 @@
+# A tour of the demo library for --headless (docs/app.md). The exec lines play
+# a demo game beside the app; they expect RECOMP_ACH_DEMO (the
+# recomp-achievements-demo binary) and RECOMP_ACH_LIBRARY (the library folder)
+# in the environment. Laid out for a 1280x800 window, a Steam Deck's screen.
+
+# The grid in each sort mode, with recent unlocks above it.
+wait 2.5
+pad x
+wait 1.6
+pad x
+wait 1.6
+pad x
+wait 1.6
+pad x
+wait 1.2
+
+# The finished Xbox 360 game: 100% with its online pack off, which is listed
+# as Off and not counted.
+pad a
+wait 1.6
+pad rb
+wait 0.9
+pad rb
+wait 2.2
+pad b
+wait 1.0
+
+# The PS3 game: trophy tiers, and a checklist opened.
+pad right
+wait 0.6
+pad a
+wait 1.2
+pad down
+pad down
+pad down
+pad down
+wait 0.4
+pad a
+wait 1.4
+
+# The game, running beside the app, lands on a planet and then unlocks a
+# trophy: the row and the grid update live, with popups.
+exec "$RECOMP_ACH_DEMO" --play "$RECOMP_ACH_LIBRARY" starfall_odyssey event land Epsilon
+wait 2.6
+exec "$RECOMP_ACH_DEMO" --play "$RECOMP_ACH_LIBRARY" starfall_odyssey unlock starfall:t19
+wait 2.8
+
+# Two profiles played it: Start picks the other one.
+pad start
+wait 1.6
+pad start
+wait 0.6
+pad b
+wait 1.8
+
+# Mouse and keyboard: hover, click a sort mode, open a game with Enter.
+mouse 860 560
+wait 0.5
+mouse 258 235 click
+wait 1.2
+key Tab
+wait 0.8
+key Enter
+wait 1.6
+key Escape
+wait 0.8
+
+# A narrower window, then the Deck's 1280x800 at a larger scale.
+size 960 800
+wait 1.6
+size 1280 800
+scale 1.25
+wait 1.6
+scale 1.0
+wait 1.0

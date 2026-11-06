@@ -55,6 +55,7 @@ can keep it off until they say yes.
 | `write_interval` | 500 ms | Progress snapshots are written at most this often. |
 | `poll_interval` | 250 ms | How often resets, set toggles and new sets are looked for. |
 | `rotate_bytes` | 4 MiB | `events.log` is renamed to `events-<unix ms>.log` past this size. 0: never. |
+| `clock` | system clock | Unix milliseconds for event times, snapshots and `last_played`; for tests and demo data. |
 
 ## Where it is
 
@@ -268,6 +269,10 @@ tolerate partial and old entries: a missing or broken `game.json` falls back to 
 unreadable set or progress file is skipped with a note in `warnings`, a progress file without totals
 still counts its unlocks, and a newer `schema` is read as far as it goes. Paths in an entry that point
 outside it are ignored.
+
+The desktop app ([app.md](app.md)) is this reader with a window. To show a game with the viewer, it
+fills a `System` that has no storage from the entry (`AddSet`, `SetSetEnabled`, then
+`System::LoadProgress()`, which replaces progress in memory without saving or calling listeners).
 
 ## Sync, later
 

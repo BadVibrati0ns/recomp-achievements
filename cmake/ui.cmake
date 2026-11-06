@@ -21,6 +21,7 @@ add_library(recomp_achievements_ui_base STATIC
     ${_ach_ui_src}/builtin_decoders.cpp
     ${_ach_ui_src}/popup_painter.cpp
     ${_ach_ui_src}/canvas.cpp
+    ${_ach_ui_src}/viewer_parts.cpp
     ${_ach_ui_src}/overlay.cpp)
 add_library(recomp::achievements_ui_base ALIAS recomp_achievements_ui_base)
 target_link_libraries(recomp_achievements_ui_base PUBLIC recomp_achievements)

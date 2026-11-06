@@ -969,3 +969,43 @@ TEST(progress_popups_from_json) {
   const Achievement* a = sys.Find("my_game:c");
   CHECK(a && a->trigger.params.value("progress_popups", 0) == 10);
 }
+
+TEST(load_progress_mirrors_without_saving_or_listeners) {
+  System sys;
+  Achievement list = Make("list", "checklist");
+  list.trigger.event = "trick";
+  list.checklist = {"Kickflip", "Heelflip"};
+  sys.AddSet(Set("g", {Make("a"), list}));
+  Recorder rec;
+  rec.Attach(sys);
+  const uint64_t gen = sys.generation();
+
+  Progress a;
+  a.unlocked = true;
+  a.unlock_time = 1700000000;
+  Progress l;
+  l.completed = {"Kickflip"};
+  sys.LoadProgress({{"g:a", a}, {"g:list", l}, {"other:x", a}}, "player2");
+  CHECK(sys.generation() > gen);
+  CHECK_EQ(sys.active_profile(), std::string("player2"));
+  CHECK(sys.IsUnlocked("g:a"));
+  CHECK_EQ(sys.GetProgress("g:a")->unlock_time, uint64_t(1700000000));
+  CHECK_EQ(sys.Snapshot()[1].progress_current, 1u);
+  CHECK(rec.log.empty());
+
+  // Replaces rather than merges.
+  sys.LoadProgress({}, "");
+  CHECK(!sys.IsUnlocked("g:a"));
+  CHECK_EQ(sys.active_profile(), std::string("default"));
+}
+
+TEST(set_clock_stamps_unlocks) {
+  System sys;
+  sys.AddSet(Set("g", {Make("a"), Make("b")}));
+  sys.SetClock([] { return uint64_t(1234); });
+  CHECK(sys.Unlock("g:a"));
+  CHECK_EQ(sys.GetProgress("g:a")->unlock_time, uint64_t(1234));
+  sys.SetClock(nullptr);
+  CHECK(sys.Unlock("g:b"));
+  CHECK(sys.GetProgress("g:b")->unlock_time > uint64_t(1234));
+}
