@@ -406,7 +406,7 @@ Style MinimalTheme() {
   return s;
 }
 
-// The My Game recomp's original look and sounds.
+// The SDK's original look and sounds.
 Style ClassicTheme() {
   Style s;
   s.theme = "classic";
@@ -476,7 +476,7 @@ Style BuiltinTheme(std::string_view name, bool* found) {
   if (l == "xbox360" || l == "xbox_360" || l == "xbox") return Xbox360Theme();
   if (l == "ps3" || l == "playstation3" || l == "playstation_3") return Ps3Theme();
   if (l == "retro" || l == "retroachievements") return RetroTheme();
-  if (l == "classic" || l == "my_game") return ClassicTheme();
+  if (l == "classic") return ClassicTheme();
   if (l != "minimal" && found) *found = false;
   return MinimalTheme();
 }

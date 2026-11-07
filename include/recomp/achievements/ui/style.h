@@ -204,7 +204,7 @@ struct Style {
 };
 
 // ---- Built-in themes ------------------------------------------------------
-// "xbox360", "ps3", "retro", "minimal", "classic" (the My Game recomp look).
+// "xbox360", "ps3", "retro", "minimal", "classic" (the SDK's original look).
 std::vector<std::string> BuiltinThemeNames();
 // Unknown names return the "minimal" theme and set *found = false.
 Style BuiltinTheme(std::string_view name, bool* found = nullptr);

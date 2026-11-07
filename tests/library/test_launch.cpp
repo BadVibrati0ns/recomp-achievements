@@ -80,7 +80,7 @@ AchievementSet OneSet() {
 TEST(shortcuts_vdf_parses) {
   const auto list = ParseSteamShortcuts(ShortcutsVdf({
       {3000000001u, "My Game", "\"/games/my_game/my_game\"", "\"/games/my_game/\"", ""},
-      {123u, "My Game", "/games/my_game/launch.sh", "/games/my_game", "--fullscreen"},
+      {123u, "Other Game", "/games/other_game/launch.sh", "/games/other_game", "--fullscreen"},
   }));
   CHECK_EQ(list.size(), size_t(2));
   CHECK_EQ(list[0].appid, 3000000001u);
@@ -314,11 +314,11 @@ TEST(launcher_prefs_round_trip) {
   CHECK(p.quit_current);
   CHECK(p.methods.empty());
   p.methods["my_game"] = LaunchMethod::kDirect;
-  p.methods["my_game"] = LaunchMethod::kSteam;
+  p.methods["other_game"] = LaunchMethod::kSteam;
   p.quit_current = false;
   CHECK(SaveLauncherPrefs(file, p));
   const LauncherPrefs q = LoadLauncherPrefs(file);
   CHECK(!q.quit_current);
   CHECK(q.methods.at("my_game") == LaunchMethod::kDirect);
-  CHECK(q.methods.at("my_game") == LaunchMethod::kSteam);
+  CHECK(q.methods.at("other_game") == LaunchMethod::kSteam);
 }

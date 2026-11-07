@@ -19,7 +19,7 @@ game icon defaults to `fallback_icon`:
 ```cpp
 ui::OverlayOptions options;                  // or ui::PopupUiOptions
 options.fallback_icon = "assets/icon.png";   // also the library's game icon
-options.library.game_id = "my_game";          // the folder name; keep it stable
+options.library.game_id = "my_game";         // the folder name; keep it stable
 options.library.title = "My Game";           // optional: else the first set's title
 options.library.version = "1.0.607";         // optional: recorded with every event
 ui::Overlay overlay(achievements, options);  // overlay.library() is the Library
@@ -135,10 +135,10 @@ The entry's files, wherever the entry is:
 ```
 library/
 ├── install.json                     one random id for this library folder
-└── my_game/                          <game id>
+└── my_game/                         <game id>
     ├── game.json
     ├── sets/
-    │   ├── my_game.achievements.json  one per loaded set, in the SDK's set format
+    │   ├── my_game.achievements.json one per loaded set, in the SDK's set format
     │   └── my_game_online.achievements.json
     ├── icons/
     │   ├── index.json                what was exported from where (hashed keys)

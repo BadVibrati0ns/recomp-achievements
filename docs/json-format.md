@@ -131,7 +131,7 @@ When a set's points add up to more than `points_cap`, each non-zero value is
 scaled by `cap / total` and rounded (never below 1). If rounding leaves the
 total off by a little, the largest value (the first, on ties) is adjusted one
 point at a time until the total is exactly the cap. This is the same scaling
-My Game mod packs have always used.
+the older mod packs used.
 
 ## Errors
 
@@ -152,7 +152,7 @@ skipped). A subfolder is a mod: its `*.achievements.json` files are loaded if
 it has any, otherwise its `achievements.json`, otherwise its `pack.json`.
 Relative icon paths resolve from the folder that holds the file.
 
-`achievements.json` and `pack.json` may also be in the older My Game pack
+`achievements.json` and `pack.json` may also be in the older pack
 format, which is still read as before:
 
 ```json

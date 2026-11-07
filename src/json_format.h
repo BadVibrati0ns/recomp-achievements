@@ -56,7 +56,7 @@ Progress ProgressFromJson(const nlohmann::json& entry);
 nlohmann::json ProgressToJson(const Progress& progress, nlohmann::json entry = nlohmann::json::object());
 bool HasProgress(const Progress& progress);
 
-// Scales points to fit the cap the way the old My Game packs did: round each
+// Scales points to fit the cap the way older mod packs did: round each
 // to the scaled value (at least 1), then trim or pad the largest until the
 // total is exactly the cap. Leaves sets at or under the cap untouched.
 void ApplyPointsCap(std::vector<Achievement>& achievements, uint32_t cap);

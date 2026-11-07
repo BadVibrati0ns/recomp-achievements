@@ -202,7 +202,7 @@ Pcm Ps3Tick() {
   return s.Finish(0.45f);
 }
 
-// ---- The My Game recomp's sounds (theme "classic") --------------------------
+// ---- The classic theme's sounds ---------------------------------------------
 
 float WhiteNoise(uint32_t& seed) {
   seed = seed * 1664525u + 1013904223u;

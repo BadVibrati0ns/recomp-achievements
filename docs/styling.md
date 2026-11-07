@@ -187,7 +187,7 @@ suggest each platform's feel; no console audio is included.
 | `ps3_bronze`, `ps3_silver`, `ps3_gold`, `ps3_platinum` | ps3 unlocks: one clear ping, richer per tier; platinum is an arpeggio |
 | `retro` | retro unlock: a short chip-tune arpeggio |
 | `minimal` | minimal unlock: two soft bell notes |
-| `classic` | classic unlock: the My Game recomp's board-landing chord |
+| `classic` | classic unlock: a short board-landing chord |
 | `tick`, `ps3_tick`, `retro_tick`, `classic_tick` | progress steps |
 
 **Replacing sounds without editing JSON.** Put WAV files in an override folder
@@ -228,7 +228,7 @@ sounds are skipped.
 }
 ```
 
-### Game: keep the My Game look, but platform look for DLC packs
+### Game: keep the classic look, but platform look for DLC packs
 
 The game's `achievements_style.json`:
 

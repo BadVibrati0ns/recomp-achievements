@@ -58,9 +58,9 @@ details while locked") is clear.
 `<root>/0000000000000000/<TITLEID>/00000002/**/spa.bin` (marketplace content),
 `.../000B0000/**/spa.bin` (title updates) and `<root>/spa.bin`. Files whose XTHD
 names another title are skipped. The best is the highest XTHD version, then the
-most achievements, then the largest file. (My Game's three content packs carry
-1.0.556, 1.0.600 and 1.0.607 databases with 52, 59 and 68 achievements; 607 is
-picked.)
+most achievements, then the largest file. (A game whose three content packs carry
+1.0.556, 1.0.600 and 1.0.607 databases with 52, 59 and 68 achievements gets
+607.)
 
 ### Icons
 
@@ -96,8 +96,8 @@ Upstream rexglue has no achievement hooks. `patches/rexglue-achievements.patch`
   `XamShowAchievementDetailsUI` stop being stubs and call the show-UI callback.
 
 Apply it to your rexglue checkout (`git -C third_party/rexglue-sdk apply
-.../patches/rexglue-achievements.patch`). My Game's own
-`rexglue-my_game-plus.patch` already contains these hunks; don't apply both.
+.../patches/rexglue-achievements.patch`). If your recomp's own rexglue patch
+already contains these hunks, don't apply both.
 
 Build with `-DRECOMP_ACH_REXGLUE_TARGET=rex::runtime`, link
 `recomp::achievements_rexglue`, and bind once the executable module is loaded:

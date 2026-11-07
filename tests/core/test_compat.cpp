@@ -1,4 +1,4 @@
-// Compatibility with the My Game recomp's mod packs and save files.
+// Compatibility with older mod packs and save files.
 
 #include "json_format.h"
 #include "recomp/achievements/system.h"

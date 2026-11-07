@@ -44,7 +44,7 @@ TEST(style_builtin_themes) {
   CHECK(BuiltinTheme("nope", &found).theme == "minimal");
   CHECK(!found);
   CHECK(BuiltinTheme("XBOX360").theme == "xbox360");
-  CHECK(BuiltinTheme("my_game").theme == "classic");
+  CHECK(BuiltinTheme("classic").theme == "classic");
   // Themes really differ.
   CHECK(!(BuiltinTheme("xbox360") == BuiltinTheme("ps3")));
   CHECK(BuiltinTheme("ps3").sound.gold != BuiltinTheme("ps3").sound.bronze);
