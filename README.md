@@ -14,7 +14,8 @@ list of its own.
 - **Popups:** unlock popups and progress popups (for example "Kickflip 3/14"), with sounds synthesized in the style of each platform. Original console sounds and artwork aren't included. Games and players can override any style or sound with JSON and WAV files. Players can set preferences once for every game, in `%APPDATA%\recomp-achievements` on Windows or `~/.config/recomp-achievements` elsewhere.
 - **An achievement viewer for any renderer:** `ui::Overlay` draws the achievement list and the popups in
   software into one image the game blends over its frame, so games without Dear ImGui (SDL2, a PSP
-  recomp's Vulkan shim, ...) get the same UI. F8 or Start + LB opens it.
+  recomp's Vulkan shim, ...) get the same UI. F8 or Start + LB opens it. Its last tab, All games,
+  shows every game in the library and can start another one, quitting this one or leaving it running.
 - **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
   in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
@@ -38,7 +39,7 @@ list of its own.
 |---|---|---|
 | `recomp::achievements` | Registry, JSON sets, triggers, saves, the shared achievement library (writer and reader), launching games | threads (nlohmann/json is bundled) |
 | `recomp::achievements_ui` | Popups, list window, styles, sounds, icons | Dear ImGui and SDL3 targets (each optional) |
-| `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding, and the software overlay (viewer + popups, `Canvas`, fonts) | nothing (stb_truetype and DejaVu Sans are bundled) |
+| `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding, and the software overlay (viewer + popups, `Canvas`, fonts, the All games page) | nothing (stb_truetype and DejaVu Sans are bundled) |
 | `recomp::achievements_xbox` | XDBF / SPA reader, title update search | nothing |
 | `recomp::achievements_trophy` | `TROPHY.TRP` / `TROPCONF.SFM` reader, sceNpTrophy backend | nothing |
 | `recomp::achievements_memory` | Memory triggers in RetroAchievements' condition syntax | nothing (a subset of rcheevos v11.6.0 is bundled) |
@@ -60,7 +61,7 @@ path. Compile these sources and set these defines:
 | Part | Sources | Defines |
 |---|---|---|
 | core | `src/system.cpp`, `src/json_format.cpp`, `src/config_dir.cpp`, `src/library.cpp`, `src/library_reader.cpp`, `src/library_util.cpp`, `src/launch.cpp` (link the platform's threads library, e.g. `-pthread`; on Windows also `shell32` and `advapi32`) | none |
-| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `viewer_parts.cpp`, `overlay.cpp` | none |
+| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `viewer_parts.cpp`, `overlay.cpp`, `src/app/app.cpp`, `src/app/library_view.cpp` | none |
 | UI, fonts | `DejaVuSans.cpp`, `DejaVuSans-Bold.cpp`, generated from `assets/fonts` with `cmake -DINPUT=assets/fonts/DejaVuSans.ttf -DOUTPUT=DejaVuSans.cpp -DSYMBOL=kDejaVuSans -P cmake/embed_file.cmake` (and `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`) | or none of them and `RECOMP_ACH_NO_EMBEDDED_FONTS=1`; then pass `OverlayOptions::font` |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
 | UI, ImGui | `src/ui/imgui_renderer.cpp`, `achievement_list.cpp`, `popup_ui.cpp` | none (needs `imgui.h` on the include path) |

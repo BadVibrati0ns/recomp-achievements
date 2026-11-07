@@ -1,4 +1,4 @@
-#include "library_view.h"
+#include "recomp/achievements/app/library_view.h"
 
 #include <algorithm>
 #include <chrono>

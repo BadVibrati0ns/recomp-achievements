@@ -1,7 +1,8 @@
 # Popup UI.
 #   recomp::achievements_ui_base  styles, popup queues, sound synthesis, icon
 #                                 cache, the software overlay (viewer and
-#                                 popups); needs neither ImGui nor SDL
+#                                 popups) and the every-game library view;
+#                                 needs neither ImGui nor SDL
 #   recomp::achievements_ui       + SDL3 sound player and PNG/WAV loading (when
 #                                 RECOMP_ACH_SDL3_TARGET is set) and the ImGui
 #                                 renderer and list window (when
@@ -22,7 +23,10 @@ add_library(recomp_achievements_ui_base STATIC
     ${_ach_ui_src}/popup_painter.cpp
     ${_ach_ui_src}/canvas.cpp
     ${_ach_ui_src}/viewer_parts.cpp
-    ${_ach_ui_src}/overlay.cpp)
+    ${_ach_ui_src}/overlay.cpp
+    # Every game's library (the desktop app's grid, and the viewer's All games page).
+    ${_ach_ui_src}/../app/app.cpp
+    ${_ach_ui_src}/../app/library_view.cpp)
 add_library(recomp::achievements_ui_base ALIAS recomp_achievements_ui_base)
 target_link_libraries(recomp_achievements_ui_base PUBLIC recomp_achievements)
 
@@ -99,7 +103,8 @@ if(RECOMP_ACH_BUILD_TESTS)
       ${_ach_ui_tests}/test_icon_cache.cpp
       ${_ach_ui_tests}/test_canvas.cpp
       ${_ach_ui_tests}/test_overlay.cpp
-      ${_ach_ui_tests}/test_library_icons.cpp)
+      ${_ach_ui_tests}/test_library_icons.cpp
+      ${_ach_ui_tests}/test_library_page.cpp)
   target_link_libraries(recomp_achievements_ui_tests PRIVATE recomp_achievements_ui_base Threads::Threads)
   # The examples in docs/styling.md are checked for unknown keys.
   target_compile_definitions(recomp_achievements_ui_tests PRIVATE

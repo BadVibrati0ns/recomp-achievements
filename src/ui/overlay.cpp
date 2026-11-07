@@ -1,5 +1,7 @@
 #include "recomp/achievements/ui/overlay.h"
 
+#include "recomp/achievements/app/app.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -13,6 +15,10 @@
 namespace recomp::achievements::ui {
 
 namespace {
+
+// The All games tab's id: set ids can't hold ':'.
+constexpr std::string_view kLibraryTab = ":library";
+
 
 // ---- Bindings -----------------------------------------------------------------
 
@@ -293,6 +299,13 @@ struct Overlay::Impl {
   std::unique_ptr<StyleManager> own_styles;
   std::unique_ptr<IconCache> own_icons;
   std::unique_ptr<Library> library;
+  // The All games page: the library app, drawn instead of the viewer while
+  // it's showing.
+  std::unique_ptr<app::App> browser;
+  bool browser_open = false;
+  bool browser_back = false;  // Its Back was pressed this frame.
+  bool browser_shown = false;  // image() is the page's.
+  bool quit_requested = false;
   NotificationCenter* center;
   StyleManager* styles;
   IconCache* icons;
@@ -524,6 +537,8 @@ struct Overlay::Impl {
   }
 
   // Start / F2 press the host button when there's no settings page to open.
+  bool LibraryPage() const { return options.show_library_page && library && library->enabled(); }
+
   bool HostKeys() const { return host_fn && !host_label.empty() && !SettingsAvailable(); }
 
   void PressHost() {
@@ -603,6 +618,12 @@ struct Overlay::Impl {
       tab_ids.push_back(s->id);
       tab_titles.push_back((s->title.empty() ? s->id : s->title) + (off ? "  \xC2\xB7  Off" : ""));
       tab_off.push_back(off);
+    }
+    if (LibraryPage()) {
+      // Last, so LB/RB reach it from either end; choosing it opens the page.
+      tab_ids.emplace_back(kLibraryTab);
+      tab_titles.push_back("All games  \xE2\x80\xBA");
+      tab_off.push_back(false);
     }
     tab = 0;
     for (size_t i = 0; i < tab_ids.size(); ++i)
@@ -910,6 +931,81 @@ struct Overlay::Impl {
     else if (labels_from_style) labels = options.buttons, labels_from_style = false;
   }
 
+  // ---- The All games page -------------------------------------------------------
+
+  void OpenBrowser() {
+    if (!LibraryPage()) return;
+    if (!browser) {
+      app::AppOptions o;
+      o.roots = options.library_roots;
+      o.global_preferences = options.global_preferences;
+      o.current_game = library->dir().filename().string();
+      o.on_back = [this] { browser_back = true; };
+      if (options.on_quit_request) o.quit_current = [this] { quit_requested = true; };
+      o.start = options.start_game;
+      o.shortcuts = options.steam_shortcuts;
+      o.launcher_prefs = options.launcher_prefs;
+      browser = std::make_unique<app::App>(std::move(o));
+    }
+    library->Flush();  // So this game's card is current.
+    browser->SetButtonLabels(labels);
+    browser->SetSize(width, height);
+    // Whatever is held (the RB that got here) mustn't act on the page.
+    OverlayInput held;
+    SetPadButtons(held, prev_pad, true);
+    browser->HoldInput(held);
+    browser_open = true;
+    open = true;
+  }
+
+  void CloseBrowser() {
+    if (!browser_open) return;
+    browser_open = false;
+    // Back on the viewer: buttons held now (the B) are latched, and it's
+    // redrawn in full over what the page left.
+    latched_pad = prev_pad;
+    latched_keys = prev_keys;
+    repeat_dir = 0;
+    size_changed = true;
+    viewer_dirty = true;
+  }
+
+  // One frame of the page. False once it has closed (the viewer draws).
+  bool BrowserFrame(float dt, const OverlayInput& in, bool& changed) {
+    const uint32_t pad = PadButtons(in), keys = KeyBits(in), fkeys = FKeyBits(in);
+    const uint32_t pad_down = pad & ~prev_pad, f_down = fkeys & ~prev_fkeys;
+    // The toggle closes everything, as from the viewer.
+    bool toggled = toggle_key > 0 && (f_down & (1u << toggle_key));
+    const bool chord_full = toggle_chord && (pad & toggle_chord) == toggle_chord;
+    if (chord_full && !chord_held && (pad_down & toggle_chord)) toggled = true;
+    chord_held = chord_full;
+    prev_pad = pad;
+    prev_keys = keys;
+    prev_fkeys = fkeys;
+    prev_mouse = in.mouse_present && in.mouse_left;
+    prev_mouse_x = in.mouse_x;
+    prev_mouse_y = in.mouse_y;
+    if (options.advance_center && dt > 0) center->Update(dt);
+    if (toggled) {
+      CloseBrowser();
+      SetOpen(false);
+      latched_pad = pad;
+      latched_keys = keys;
+      return false;
+    }
+    browser_back = false;
+    changed = browser->Frame(dt, in);
+    if (quit_requested) {
+      quit_requested = false;
+      if (options.on_quit_request) options.on_quit_request();
+    }
+    if (browser_back) {
+      CloseBrowser();
+      return false;
+    }
+    return true;
+  }
+
   // ---- Actions --------------------------------------------------------------
 
   void SetOpen(bool o) {
@@ -928,6 +1024,7 @@ struct Overlay::Impl {
       settings_screen = false;
       reset_mode = false;
       release_latch = true;
+      if (browser_open) CloseBrowser();
     }
     ClearHold();
   }
@@ -1121,6 +1218,10 @@ struct Overlay::Impl {
   void SetTab(size_t t, const Metrics& m) {
     if (tab_ids.empty()) return;
     t = std::min(t, tab_ids.size() - 1);
+    if (tab_ids[t] == kLibraryTab) {
+      OpenBrowser();
+      return;
+    }
     if (t == tab) return;
     tab = t;
     selected = 0;
@@ -2272,7 +2373,23 @@ struct Overlay::Impl {
     clock += dt;
     if (width <= 0 || height <= 0 || !font || !font_bold) return false;
     RefreshBindings();
-    HandleInput(dt, in);
+    if (browser_open) {
+      bool changed = false;
+      if (BrowserFrame(dt, in, changed)) {
+        if (!changed) return false;
+        last_dirty = browser_shown ? browser->dirty_rect() : PixelRect{0, 0, width, height};
+        browser_shown = true;
+        shown = true;
+        ++stats.renders;
+        return true;
+      }
+    } else {
+      HandleInput(dt, in);
+    }
+    if (browser_shown) {
+      browser_shown = false;
+      size_changed = true;  // Redraw the viewer over everything the page drew.
+    }
     // Also while closing: the fading panel still reads the model.
     if (open || open_t > 0.0f) EnsureModel();
 
@@ -2378,6 +2495,7 @@ void Overlay::SetSize(int width, int height, float ui_scale) {
 bool Overlay::Frame(float dt, const OverlayInput& input) { return impl_->Frame(dt, input); }
 
 const Image& Overlay::image() const {
+  if (impl_->browser_open && impl_->browser_shown) return impl_->browser->image();  // Opaque: the same premultiplied.
   return impl_->options.premultiplied ? impl_->canvas.premultiplied() : impl_->canvas.image();
 }
 
@@ -2446,6 +2564,16 @@ StyleManager& Overlay::styles() { return *impl_->styles; }
 IconCache& Overlay::icons() { return *impl_->icons; }
 SoundBank& Overlay::sounds() { return impl_->bank; }
 Library* Overlay::library() { return impl_->library.get(); }
+
+bool Overlay::OpenLibraryPage() {
+  Impl& m = *impl_;
+  if (!m.LibraryPage()) return false;
+  m.SetOpen(true);
+  m.OpenBrowser();
+  return true;
+}
+
+app::App* Overlay::library_page() { return impl_->browser_open ? impl_->browser.get() : nullptr; }
 Overlay::Stats Overlay::stats() const { return impl_->stats; }
 
 Overlay::ViewState Overlay::view_state() const {
@@ -2466,6 +2594,7 @@ Overlay::ViewState Overlay::view_state() const {
   v.settings = m.settings_screen;
   v.reset_mode = m.reset_mode;
   v.tabs = m.tab_ids;
+  v.library_page = m.browser_open;
   for (int i : m.setting_items) v.setting_rows.push_back(m.setting_rows[i].id);
   v.setting_selected = m.setting_sel_id;
   v.hold = m.hold_id.empty() ? 0.0f : m.HoldFraction(m.hold_id);

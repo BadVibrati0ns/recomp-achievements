@@ -1,7 +1,8 @@
-# recomp-achievements, the desktop app (docs/app.md). The core (grid, game
-# page, library polling, scripts) needs no SDL, so its tests run headless;
+# recomp-achievements, the desktop app (docs/app.md). The grid and game page
+# are recomp::achievements_ui_base's (src/app, also the viewer's All games
+# page); the core adds scripts and needs no SDL, so its tests run headless;
 # the executable adds the SDL3 window.
-add_library(recomp_achievements_app_core STATIC app.cpp library_view.cpp script.cpp)
+add_library(recomp_achievements_app_core STATIC script.cpp)
 target_include_directories(recomp_achievements_app_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(recomp_achievements_app_core PUBLIC recomp_achievements_ui_base)
 

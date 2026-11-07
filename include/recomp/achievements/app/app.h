@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "library_view.h"
+#include "recomp/achievements/app/library_view.h"
 #include "recomp/achievements/launch.h"
 #include "recomp/achievements/ui/overlay.h"
 
@@ -42,6 +42,16 @@ struct AppOptions {
   std::function<std::vector<SteamShortcut>()> shortcuts;
   // The player's launch choices; empty = DefaultLauncherPrefsFile().
   std::filesystem::path launcher_prefs;
+
+  // Inside a game (the viewer's All games page, docs/overlay.md).
+  // The game this runs in: its card says Playing, and Play on it says so.
+  std::string current_game;
+  // B / Esc on the grid goes back to the game's own viewer. Null: nothing.
+  std::function<void()> on_back;
+  // Set: the Play menu offers "Quit current game" (ticked as the player last
+  // left it, launcher.json), and this is called once another game has started
+  // with it ticked. The game should save and exit.
+  std::function<void()> quit_current;
 };
 
 class App {
@@ -65,6 +75,9 @@ class App {
   void SetScale(float scale);
   // F11, or Back on the grid, asked to toggle fullscreen since the last call.
   bool TakeFullscreenToggle();
+  // Buttons and keys held now (the press that opened this) stay ignored until
+  // they're let go.
+  void HoldInput(const ui::OverlayInput& held);
   // Looks at the library now instead of at the next poll; true when it changed.
   bool Poll();
 
@@ -85,6 +98,8 @@ class App {
     std::string launch_game;
     std::string launch_choice;  // "steam", "direct", or empty when neither can start it.
     std::string launch_error;
+    bool quit_box = false;      // The menu offers "Quit current game".
+    bool quit_current = false;  // ... ticked.
     std::vector<std::string> running;   // Game ids running now.
     std::vector<std::string> starting;  // Started from here, not running yet.
     std::vector<std::string> launched;  // Commands started, oldest first: argv (or the URL) joined by spaces.

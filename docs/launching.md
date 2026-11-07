@@ -107,8 +107,8 @@ every game (`GlobalConfigDir()`). This is the only file the app writes:
 }
 ```
 
-`quit_current` is the "Quit current game" box for starting another game from inside a game; the
-in-game launcher will use it.
+`quit_current` is the "Quit current game" box, shown when another game is started from inside a game
+(the viewer's [All games page](overlay.md#all-games)).
 
 ## In the app
 
@@ -122,6 +122,14 @@ and its unlocks pop up as they happen. Opening the menu for a game that is alrea
 and only offers Close, so a second copy can't be started by accident. If starting fails, the reason
 stays in the menu.
 
+## Inside a game
+
+The in-game viewer's last tab, **All games**, shows the same page inside the game
+([overlay.md](overlay.md#all-games)). Its Play menu adds a **Quit current game** box, ticked by default and
+remembered for every game. With it ticked, the game is asked to quit (`OverlayOptions::on_quit_request`)
+once the other game has started. Unticked, both keep running, so on a Steam Deck one game can stay paused
+in the background while the other plays. The game being played can't be started again from its own card.
+
 ## Trying it
 
 The demo library makes a `play.sh` for each game and a Steam shortcut for Starfall Odyssey. Started
@@ -134,3 +142,6 @@ recomp-achievements --library /tmp/demo/library --steam-home /tmp/demo/steam-hom
 ```
 
 Pick **Launch directly** for the demo games. Their Steam entry is made up, so Steam can't start it.
+
+To try the in-game page, run a stand-in game with the viewer over it in headless mode (`--in-game`,
+[app.md](app.md#headless-mode)). F8 opens the viewer, and RB opens All games.

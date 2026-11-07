@@ -131,6 +131,13 @@ labels playstation    exec <shell command>  poll
 
 `apps/achievements/tour.script` is the tour in the demo video.
 
+`--in-game` renders something else: a stand-in game ("Overlay Demo") that writes to the first `--library`,
+with the in-game viewer over it, so a script can show the viewer's [All games page](overlay.md#all-games).
+When that game is asked to quit, it says so on screen.
+
+The grid and game page are in `recomp::achievements_ui_base` (`include/recomp/achievements/app/`), so the
+in-game viewer can show them too; the app adds the window and scripts.
+
 ## Privacy
 
 The app only reads the library: it never writes to it, to a game's files or to the player's folder,

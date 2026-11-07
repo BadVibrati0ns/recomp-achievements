@@ -6,7 +6,7 @@
 #include <fstream>
 #include <functional>
 
-#include "app.h"
+#include "recomp/achievements/app/app.h"
 #include "demo_library.h"
 #include "script.h"
 #include "test.h"

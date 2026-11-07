@@ -23,6 +23,10 @@
 #include "recomp/achievements/ui/style.h"
 #include "recomp/achievements/ui/viewer_parts.h"
 
+namespace recomp::achievements::app {
+class App;  // recomp/achievements/app/app.h: the All games page.
+}
+
 namespace recomp::achievements::ui {
 
 // What the game passes each frame: true while a key or button is held. Fill
@@ -135,6 +139,22 @@ struct OverlayOptions {
   bool show_disabled_sets = false;
   std::string title = "Achievements";
 
+  // The All games page: a last tab after the sets that opens every game in
+  // the shared library, as the desktop app shows it, and starts other games
+  // through Steam or directly (docs/launching.md). Shown once library.game_id
+  // is set and the library is on.
+  bool show_library_page = true;
+  // Library folders it shows; empty = DefaultLibraryRoots().
+  std::vector<std::filesystem::path> library_roots;
+  // Called (from Frame()) after the player started another game with "Quit
+  // current game" ticked: save and exit. Null: the box isn't offered and the
+  // game keeps running.
+  std::function<void()> on_quit_request;
+  // Launch hooks, as in app::AppOptions: null/empty = the real ones. For tests.
+  std::function<bool(const LaunchCommand& command, std::string* error)> start_game;
+  std::function<std::vector<SteamShortcut>()> steam_shortcuts;
+  std::filesystem::path launcher_prefs;
+
   // TTF/OTF bytes; empty = the bundled DejaVu Sans. A regular font without a
   // bold one draws bold text thickened.
   std::vector<uint8_t> font;
@@ -197,6 +217,11 @@ class Overlay {
   SoundBank& sounds();
   // Null unless options.library is on.
   Library* library();
+  // Opens the viewer on the All games page (e.g. from the game's own menu).
+  // False when there's no library.
+  bool OpenLibraryPage();
+  // The All games page while it's showing, else null. For tests and tools.
+  app::App* library_page();
 
   // What the viewer shows, for tests and tools.
   struct ViewState {
@@ -212,13 +237,14 @@ class Overlay {
     // The settings page and the reset mode of the list.
     bool settings = false;
     bool reset_mode = false;   // The list picks achievements to reset.
-    std::vector<std::string> tabs;  // Set ids; "" = all sets.
+    std::vector<std::string> tabs;  // Set ids; "" = all sets; ":library" = All games.
     // Settings rows, in order: "sound", "volume", "set:<id>", "reset:pick",
     // "reset:set:<id>", "reset:all".
     std::vector<std::string> setting_rows;
     std::string setting_selected;
     float hold = 0.0f;  // 0..1 while a reset is being held.
     std::string host_button;  // SetHostButton's label; empty when none.
+    bool library_page = false;  // The All games page is showing.
   };
   ViewState view_state() const;
 

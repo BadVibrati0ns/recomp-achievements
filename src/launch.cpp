@@ -789,15 +789,17 @@ LauncherPrefs LoadLauncherPrefs(const fs::path& file) {
 
 bool SaveLauncherPrefs(const fs::path& file, const LauncherPrefs& prefs) {
   if (file.empty()) return false;
-  nlohmann::ordered_json doc = detail::ReadJsonFile(file).is_object()
-                                   ? nlohmann::ordered_json::parse(detail::ReadJsonFile(file).dump())
-                                   : nlohmann::ordered_json::object();
-  doc["schema"] = kPrefsSchema;
-  doc["quit_current"] = prefs.quit_current;
-  nlohmann::ordered_json games = doc.contains("games") && doc["games"].is_object() ? doc["games"]
-                                                                                    : nlohmann::ordered_json::object();
+  // Unknown keys and other games' entries are kept; ours go first.
+  const json old = detail::ReadJsonFile(file);
+  nlohmann::ordered_json doc = {{"schema", kPrefsSchema}, {"quit_current", prefs.quit_current}};
+  nlohmann::ordered_json games = nlohmann::ordered_json::object();
+  if (old.is_object() && old.contains("games") && old["games"].is_object())
+    games = nlohmann::ordered_json::parse(old["games"].dump());
   for (const auto& [id, m] : prefs.methods) games[id]["method"] = LaunchMethodName(m);
   doc["games"] = std::move(games);
+  if (old.is_object())
+    for (const auto& [k, v] : old.items())
+      if (!doc.contains(k)) doc[k] = nlohmann::ordered_json::parse(v.dump());
   std::error_code ec;
   fs::create_directories(file.parent_path(), ec);
   return detail::WriteJsonAtomic(file, doc);

@@ -155,6 +155,41 @@ locked description until "Show secrets" is on, the same rules as the ImGui list.
 Popups keep playing **over** the open viewer, so an unlock while browsing shows up and its row updates.
 With `popups_over_viewer = false` they wait (the center isn't advanced) until the viewer closes.
 
+## All games
+
+When the game has the [library](library.md) on (`library.game_id`), the viewer's last tab is **All games ›**.
+RB past the last set (or LB before the first, or a click) opens every game in the shared library, drawn just
+as the [desktop app](app.md) draws it. The page covers the screen and has these features:
+
+- Each game appears as a card, with its progress counted over the sets that are on.
+- Recent unlocks from all games are listed.
+- Games can be sorted four ways.
+- Opening a game shows its own page.
+- This game's card says **Playing**.
+
+From the page, the player can start another game:
+
+- Y (triangle), Space or the card's **Play** button opens the Play menu: **Launch through Steam** or
+  **Launch directly**, as in the app ([launching.md](launching.md)).
+- The menu also has a **Quit current game** box, which the player ticks with X or Tab.
+  - It is ticked by default.
+  - The player's choice is remembered for every game.
+  - It is shown only when the game passes `on_quit_request`.
+- When another game starts with the box ticked, the overlay calls `on_quit_request` from `Frame()`. The game
+  should save and exit.
+- Unticked, both games keep running, so on a Steam Deck one game can stay paused in the background while the
+  other plays.
+
+B or Esc on the page returns to the viewer on the tab it came from. F8 or Start + LB closes everything.
+
+`OpenLibraryPage()` opens the viewer straight on the page, for example from the game's own menu.
+`show_library_page = false` hides the tab.
+
+```cpp
+options.library.game_id = "my_game";
+options.on_quit_request = [] { RequestSaveAndQuit(); };  // The game's own clean exit.
+```
+
 ## Settings page
 
 Start (Options on PlayStation), F2 or the Settings button beside the title opens the settings; B goes back
@@ -205,6 +240,10 @@ can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()`
 | `reset_hold_seconds` | 1.2 | How long a reset is held. |
 | `show_disabled_sets` | false | Sets that are off get tabs too, marked Off and dimmed, still out of the totals. For apps showing another game's data. |
 | `title` | `"Achievements"` | Panel title. |
+| `show_library_page` | true | The All games tab, when the library is on. |
+| `library_roots` | `DefaultLibraryRoots()` | Library folders the page shows. |
+| `on_quit_request` | null | Called after the player starts another game with "Quit current game" ticked. Null: no box. |
+| `start_game`, `steam_shortcuts`, `launcher_prefs` | real | Launch hooks, as in `app::AppOptions`; for tests. |
 | `font`, `font_bold` | empty | TTF/OTF bytes; empty uses the bundled DejaVu Sans. A regular font with no bold one is thickened for bold text. Code points a game font lacks fall back to DejaVu. |
 | `premultiplied` | false | `image()` in premultiplied alpha (blend `src + dst * (1 - a)`). |
 

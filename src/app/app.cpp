@@ -1,4 +1,4 @@
-#include "app.h"
+#include "recomp/achievements/app/app.h"
 
 #include <algorithm>
 #include <cmath>
@@ -181,9 +181,11 @@ struct App::Impl {
     std::string id, title;
     LaunchPlan plan;
     int choice = -1;  // 0 Steam, 1 direct, -1 neither can start it.
+    bool on_quit = false;  // The Quit current game box has the focus.
     std::string error;
-    RectF rows[2], play, cancel, box;
+    RectF rows[2], quit, play, cancel, box;
   };
+  bool QuitBox() const { return menu && options.quit_current && menu->id != options.current_game && !menu->plan.running; }
   std::optional<Menu> menu;
   RectF play_hit;  // The selected card's Play button.
 
@@ -443,7 +445,7 @@ struct App::Impl {
     m.id = id;
     m.title = it->second.title.empty() ? id : it->second.title;
     m.plan = PlanLaunch(it->second, shortcuts);
-    m.plan.running = m.plan.running || running.count(id) > 0;
+    m.plan.running = m.plan.running || running.count(id) > 0 || id == options.current_game;
     const bool can[2] = {!m.plan.steam_game_id.empty(), m.plan.direct};
     if (const auto p = prefs.methods.find(id); p != prefs.methods.end() && can[p->second == LaunchMethod::kDirect])
       m.choice = p->second == LaunchMethod::kDirect ? 1 : 0;
@@ -477,33 +479,54 @@ struct App::Impl {
     for (const auto& a : command->argv) line += (line.empty() ? "" : " ") + a;
     launched.push_back(line);
     prefs.methods[menu->id] = method;
+    const bool quit = QuitBox() && prefs.quit_current;
     if (!prefs_file.empty()) SaveLauncherPrefs(prefs_file, prefs);
     starting[menu->id] = 30.0f;
     CloseMenu();
+    if (quit) options.quit_current();
+  }
+
+  void ToggleQuit() {
+    prefs.quit_current = !prefs.quit_current;
+    if (!prefs_file.empty()) SaveLauncherPrefs(prefs_file, prefs);
+    grid_dirty = true;
   }
 
   void MenuInput(uint32_t pd, uint32_t kd, const OverlayInput& in, bool click) {
     if ((pd & kPadB) || (kd & kEscape)) return CloseMenu();
+    if ((pd & kPadX) || (kd & kTab)) {
+      if (QuitBox()) ToggleQuit();
+      return;
+    }
     if ((pd & kPadA) || (kd & kEnter) || (pd & kPadY) || (kd & kSpace)) {
       if (menu->plan.running) return CloseMenu();
+      if (menu->on_quit && ((pd & kPadA) || (kd & kEnter))) return ToggleQuit();
       return LaunchChosen();
     }
     const bool up = (pd & kPadUp) || (kd & kUp), down = (pd & kPadDown) || (kd & kDown);
     if ((up || down) && !menu->plan.running) {
-      const int next = up ? 0 : 1;
-      if (CanChoose(next) && next != menu->choice) {
-        menu->choice = next;
-        menu->error.clear();
-        grid_dirty = true;
+      // Focus moves Steam, direct, then the box; a method row is also the choice.
+      if (down && (menu->choice == 1 || !CanChoose(1)) && QuitBox()) {
+        menu->on_quit = true;
+      } else if (up && menu->on_quit) {
+        menu->on_quit = false;
+        if (menu->choice < 0) menu->choice = CanChoose(1) ? 1 : CanChoose(0) ? 0 : -1;
+      } else if (!menu->on_quit) {
+        const int next = up ? 0 : 1;
+        if (CanChoose(next) && next != menu->choice) menu->choice = next;
       }
+      menu->error.clear();
+      grid_dirty = true;
     }
     if (click) {
       const float mx = in.mouse_x, my = in.mouse_y;
+      if (QuitBox() && Inside(menu->quit, mx, my)) return ToggleQuit();
       if (Inside(menu->play, mx, my)) return menu->plan.running ? CloseMenu() : LaunchChosen();
       if (Inside(menu->cancel, mx, my) || !Inside(menu->box, mx, my)) return CloseMenu();
       for (int i = 0; i < 2; ++i)
         if (Inside(menu->rows[i], mx, my) && CanChoose(i) && !menu->plan.running) {
           menu->choice = i;
+          menu->on_quit = false;
           menu->error.clear();
           grid_dirty = true;
         }
@@ -642,6 +665,10 @@ struct App::Impl {
     if (kd & kF11) fullscreen_request = true;
     if (page) return;  // The viewer has its own input (Frame passes it on).
     if (menu) return MenuInput(pd, kd, in, click);
+    if (options.on_back && ((pd & kPadB) || (kd & kEscape))) {
+      Latch();
+      return options.on_back();
+    }
     if (pd & kPadBack) fullscreen_request = true;
 
     const Layout l = MakeLayout();
@@ -766,7 +793,9 @@ struct App::Impl {
     float px = tx;
     px += Pill(px, y + 11.0f * s, s, PlatformName(g.platform), PlatformColor(g.platform), Color::Rgba(255, 255, 255)) +
           6.0f * s;
-    if (running.count(g.id))
+    if (g.id == options.current_game)
+      px += Pill(px, y + 11.0f * s, s, "Playing", th.accent, OnColor(th.accent)) + 6.0f * s;
+    else if (running.count(g.id))
       px += Pill(px, y + 11.0f * s, s, "Running", Color::Rgba(46, 160, 92), Color::Rgba(255, 255, 255)) + 6.0f * s;
     else if (starting.count(g.id))
       px += Pill(px, y + 11.0f * s, s, "Starting\xE2\x80\xA6", MixColor(th.panel, th.text, 0.2f), th.text) + 6.0f * s;
@@ -955,6 +984,7 @@ struct App::Impl {
     if (!games.empty()) x += hints.Hint(PadGlyph::kA, "Enter", "Open", x, fy) + gap;
     if (!games.empty()) x += hints.Hint(PadGlyph::kY, "Space", "Play", x, fy) + gap;
     x += hints.Hint(PadGlyph::kX, "Tab", "Sort", x, fy) + gap;
+    if (options.on_back) x += hints.Hint(PadGlyph::kB, "Esc", "Back", x, fy) + gap;
     const float fw = hints.Hint(PadGlyph::kBack, "F11", "Fullscreen", 0, fy, false);
     hints.Hint(PadGlyph::kBack, "F11", "Fullscreen", x1 - fw, fy);
     drawn_minute = Now() / 60;
@@ -971,6 +1001,7 @@ struct App::Impl {
     const bool running_now = m.plan.running;
     float bh = pad + 34.0f * s + 14.0f * s;
     bh += running_now ? 64.0f * s : 2 * row_h + 12.0f * s;
+    if (QuitBox()) bh += 44.0f * s + 12.0f * s;
     if (!m.error.empty()) bh += 34.0f * s;
     bh += 20.0f * s + 40.0f * s + pad;
     const RectF box{(w - bw) * 0.5f, (h - bh) * 0.5f, (w + bw) * 0.5f, (h + bh) * 0.5f};
@@ -986,9 +1017,14 @@ struct App::Impl {
     m.rows[0] = m.rows[1] = {};
     if (running_now) {
       const float ms = 17.0f * s, ds = 14.5f * s;
-      Text(true, ms, x0, y, m.title + " is already running.", th.text);
+      const bool here = m.id == options.current_game;
+      Text(true, ms, x0, y, here ? "You're playing it now." : m.title + " is already running.", th.text);
       Text(false, ds, x0, y + ms + 10.0f * s,
-           Canvas::EllipsizeText(*font, ds, "Switch to it instead of starting a second copy.", x1 - x0), th.subtext);
+           Canvas::EllipsizeText(*font, ds,
+                                 here ? "Pick another game to start it from here."
+                                      : "Switch to it instead of starting a second copy.",
+                                 x1 - x0),
+           th.subtext);
       y += 64.0f * s;
     } else {
       std::string steam_note = "No Steam entry found for this game.";
@@ -1002,9 +1038,9 @@ struct App::Impl {
       for (int i = 0; i < 2; ++i) {
         const RectF r{x0, y, x1, y + row_h};
         m.rows[i] = r;
-        const bool on = CanChoose(i), cur = m.choice == i;
-        grid.FillRect(r, cur ? th.row_selected : th.row, 10.0f * s);
-        if (cur) grid.StrokeRect(r, WithAlpha(th.accent, 0.85f), 10.0f * s, 2.0f * s);
+        const bool on = CanChoose(i), cur = m.choice == i, focus = cur && !m.on_quit;
+        grid.FillRect(r, focus ? th.row_selected : th.row, 10.0f * s);
+        if (focus) grid.StrokeRect(r, WithAlpha(th.accent, 0.85f), 10.0f * s, 2.0f * s);
         // A radio dot.
         const float cx = r.x0 + 26.0f * s, cy = (r.y0 + r.y1) * 0.5f, rr = 9.0f * s;
         grid.StrokeCircle(cx, cy, rr, 2.0f * s, on ? th.text : WithAlpha(th.subtext, 0.5f));
@@ -1021,6 +1057,30 @@ struct App::Impl {
         Text(false, ds, tx, r.y0 + 15.0f * s + ns + 9.0f * s, Canvas::EllipsizeText(*font, ds, notes[i], tw),
              on ? th.subtext : WithAlpha(th.subtext, 0.6f));
         y += row_h + 12.0f * s;
+      }
+      m.quit = {};
+      if (QuitBox()) {
+        // "Quit current game", remembered for every game.
+        const float qh = 44.0f * s;
+        const RectF r{x0, y, x1, y + qh};
+        m.quit = r;
+        if (m.on_quit) {
+          grid.FillRect(r, th.row_selected, 10.0f * s);
+          grid.StrokeRect(r, WithAlpha(th.accent, 0.85f), 10.0f * s, 2.0f * s);
+        }
+        const float bx = r.x0 + 17.0f * s, bs = 18.0f * s, by = (r.y0 + r.y1 - bs) * 0.5f;
+        const RectF b{bx, by, bx + bs, by + bs};
+        if (prefs.quit_current) {
+          grid.FillRect(b, th.accent, 4.0f * s);
+          DrawCheckMark(grid, (b.x0 + b.x1) * 0.5f, (b.y0 + b.y1) * 0.5f, bs * 0.3f, 2.2f * s, OnColor(th.accent));
+        } else {
+          grid.StrokeRect(b, th.text, 4.0f * s, 2.0f * s);
+        }
+        const float ns = 16.0f * s;
+        Text(true, ns, b.x1 + 14.0f * s, (r.y0 + r.y1 - ns) * 0.5f - 1.0f * s, "Quit current game", th.text);
+        const float gw = hints.Glyph(PadGlyph::kX, "Tab", 0, 0, false);
+        hints.Glyph(PadGlyph::kX, "Tab", r.x1 - 14.0f * s - gw, (r.y0 + r.y1) * 0.5f);
+        y += qh + 12.0f * s;
       }
     }
     if (!m.error.empty()) {
@@ -1225,6 +1285,13 @@ bool App::TakeFullscreenToggle() {
 
 bool App::Poll() { return impl_->Poll(); }
 
+void App::HoldInput(const OverlayInput& held) {
+  Impl& m = *impl_;
+  m.prev_pad = PadButtons(held);
+  m.prev_keys = Keys(held);
+  m.Latch();
+}
+
 App::State App::state() const {
   const Impl& m = *impl_;
   State s;
@@ -1246,6 +1313,8 @@ App::State App::state() const {
     s.launch_game = m.menu->id;
     s.launch_choice = m.menu->choice == 0 ? "steam" : m.menu->choice == 1 ? "direct" : "";
     s.launch_error = m.menu->error;
+    s.quit_box = m.QuitBox();
+    s.quit_current = m.prefs.quit_current;
   }
   s.running.assign(m.running.begin(), m.running.end());
   for (const auto& [id, t] : m.starting) s.starting.push_back(id);

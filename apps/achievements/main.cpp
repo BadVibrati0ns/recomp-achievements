@@ -8,11 +8,14 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "app.h"
+#include "recomp/achievements/app/app.h"
+#include "recomp/achievements/ui/canvas.h"
+#include "recomp/achievements/ui/overlay.h"
 #include "recomp/achievements/ui/sdl_support.h"
 #include "script.h"
 
@@ -33,6 +36,7 @@ struct Args {
   float fps = 30.0f;
   float quit_after = 0.0f;  // Windowed: close after this many seconds (smoke tests).
   std::filesystem::path steam_home, launcher_prefs;
+  bool in_game = false;  // Headless: a stand-in game with the in-game viewer instead of the app.
 };
 
 int Usage() {
@@ -53,6 +57,9 @@ int Usage() {
                "  --out-size WxH       headless frame size (default: --size); the window\n"
                "                       is centred in it when a script resizes it\n"
                "  --fps N              headless frame rate (default 30)\n"
+               "  --in-game            headless: a stand-in game (\"overlay_demo\") writing to the\n"
+               "                       first --library, with the in-game viewer over it (F8 or\n"
+               "                       Start+LB; its last tab is All games), instead of the app\n"
                "  --quit-after SECONDS close the window after a while (tests)\n");
   return 2;
 }
@@ -76,6 +83,7 @@ bool ParseArgs(int argc, char** argv, Args& a) {
     else if (k == "--launcher-prefs" && (v = value())) a.launcher_prefs = v;
     else if (k == "--fullscreen") a.fullscreen = true;
     else if (k == "--headless") a.headless = true;
+    else if (k == "--in-game") a.in_game = true;
     else if (k == "--no-preferences") a.global_preferences = false;
     else return false;
   }
@@ -97,6 +105,101 @@ AppOptions MakeOptions(const Args& a) {
     };
   return o;
 }
+
+// ---- A stand-in game, for the in-game viewer --------------------------------------
+
+// A made-up game with three achievements and a plain backdrop, writing its own
+// library entry ("overlay_demo") and showing the in-game viewer over itself,
+// as a game using ui::Overlay does. Asked to quit, it says so on screen.
+struct InGame {
+  System system;
+  ui::Overlay overlay;
+  ui::Canvas backdrop;
+  std::shared_ptr<ui::Font> font = ui::Font::Builtin(true);
+  ui::Image out;
+  bool quit = false, drawn_quit = false;
+
+  static AchievementSet Set() {
+    AchievementSet s;
+    s.id = "overlay_demo";
+    s.title = "Overlay Demo";
+    s.platform = Platform::kCustom;
+    const char* names[3] = {"First Steps", "Halfway There", "The End"};
+    for (int i = 0; i < 3; ++i) {
+      Achievement a;
+      a.local_id = "a" + std::to_string(i);
+      a.name = names[i];
+      a.description = "A stand-in achievement.";
+      a.points = 10 * (i + 1);
+      s.achievements.push_back(a);
+    }
+    return s;
+  }
+
+  static ui::OverlayOptions Options(const Args& a, InGame* self) {
+    ui::OverlayOptions o;
+    o.global_preferences = a.global_preferences;
+    o.create_global_preferences = false;
+    o.title = "Overlay Demo";
+    o.library.game_id = "overlay_demo";
+    o.library.title = "Overlay Demo";
+    o.library.root = a.roots.front();
+    o.library.wine_host = false;
+    o.library_roots = a.roots;
+    o.launcher_prefs = a.launcher_prefs;
+    if (!a.steam_home.empty())
+      o.steam_shortcuts = [home = a.steam_home] {
+        std::vector<SteamShortcut> all;
+        for (const auto& f : FindSteamShortcutFiles(home))
+          for (auto& s : ReadSteamShortcuts(f)) all.push_back(std::move(s));
+        return all;
+      };
+    o.on_quit_request = [self] { self->quit = true; };
+    return o;
+  }
+
+  explicit InGame(const Args& a) : overlay(system, (system.AddSet(Set()), system.Unlock("overlay_demo:a0"), Options(a, this))) {
+    SetSize(a.width, a.height);
+  }
+
+  void SetSize(int w, int h) {
+    overlay.SetSize(w, h);
+    backdrop.Resize(w, h);
+    out.width = w;
+    out.height = h;
+    out.rgba.assign(static_cast<size_t>(w) * h * 4, 255);
+    DrawBackdrop();
+  }
+
+  void DrawBackdrop() {
+    const float w = static_cast<float>(backdrop.width()), h = static_cast<float>(backdrop.height());
+    for (int y = 0; y < backdrop.height(); ++y) {
+      const float t = y / std::max(1.0f, h);
+      backdrop.Fill({0, y, backdrop.width(), y + 1},
+                    ui::Color::Rgba(static_cast<int>(40 + 30 * t), static_cast<int>(70 + 50 * t), static_cast<int>(110 - 40 * t)));
+    }
+    const char* line = quit ? "The game was asked to quit (Quit current game)." : "Your game here";
+    const float size = h / 18.0f;
+    backdrop.Text(*font, size, (w - font->TextWidth(size, line)) * 0.5f, h * 0.45f, line, ui::Color::Rgba(255, 255, 255, 220));
+    drawn_quit = quit;
+  }
+
+  bool Frame(float dt, const ui::OverlayInput& in) {
+    const bool changed = overlay.Frame(dt, in);
+    const bool quit_changed = quit != drawn_quit;
+    if (quit_changed) DrawBackdrop();
+    if (!changed && !quit_changed) return false;
+    const ui::Image& base = backdrop.image();
+    const ui::Image& top = overlay.image();
+    for (size_t i = 0; i + 3 < out.rgba.size(); i += 4) {
+      const int alpha = i + 3 < top.rgba.size() ? top.rgba[i + 3] : 0;
+      for (int k = 0; k < 3; ++k)
+        out.rgba[i + k] = static_cast<uint8_t>((base.rgba[i + k] * (255 - alpha) + top.rgba[i + k] * alpha + 127) / 255);
+    }
+    return true;
+  }
+  const ui::Image& image() const { return out; }
+};
 
 // ---- Headless ------------------------------------------------------------------
 
@@ -129,12 +232,20 @@ int RunHeadless(const Args& args) {
 
   App app(MakeOptions(args));
   app.SetSize(args.width, args.height);
+  std::unique_ptr<InGame> game;
+  if (args.in_game) {
+    if (args.roots.empty()) {
+      std::fprintf(stderr, "--in-game needs --library\n");
+      return 2;
+    }
+    game = std::make_unique<InGame>(args);
+  }
   uint64_t redraws = 0;
   ScriptTarget target;
   target.frame = [&](float dt, const ui::OverlayInput& in) {
     // Mouse positions are in the window, which sits centred in the frame.
-    redraws += app.Frame(dt, in);
-    const ui::Image& img = app.image();
+    redraws += game ? game->Frame(dt, in) : app.Frame(dt, in);
+    const ui::Image& img = game ? game->image() : app.image();
     const int x0 = (ow - img.width) / 2, y0 = (oh - img.height) / 2;
     for (int y = 0; y < oh; ++y) {
       uint8_t* d = &frame[static_cast<size_t>(y) * ow * 3];
@@ -150,10 +261,18 @@ int RunHeadless(const Args& args) {
     }
     std::fwrite(frame.data(), 1, frame.size(), out);
   };
-  target.resize = [&](int w, int h) { app.SetSize(std::min(w, ow), std::min(h, oh)); };
+  target.resize = [&](int w, int h) {
+    if (game) game->SetSize(std::min(w, ow), std::min(h, oh));
+    else app.SetSize(std::min(w, ow), std::min(h, oh));
+  };
   target.scale = [&](float s) { app.SetScale(s); };
-  target.labels = [&](ui::ButtonLabels l) { app.SetButtonLabels(l); };
-  target.poll = [&] { app.Poll(); };
+  target.labels = [&](ui::ButtonLabels l) {
+    if (game) game->overlay.SetButtonLabels(l);
+    else app.SetButtonLabels(l);
+  };
+  target.poll = [&] {
+    if (!game) app.Poll();
+  };
   const int frames = RunScript(script, args.fps, target);
   if (out != stdout) std::fclose(out);
   else std::fflush(stdout);
