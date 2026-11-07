@@ -61,7 +61,7 @@ path. Compile these sources and set these defines:
 | Part | Sources | Defines |
 |---|---|---|
 | core | `src/system.cpp`, `src/json_format.cpp`, `src/config_dir.cpp`, `src/library.cpp`, `src/library_reader.cpp`, `src/library_util.cpp`, `src/launch.cpp` (link the platform's threads library, e.g. `-pthread`; on Windows also `shell32` and `advapi32`) | none |
-| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `viewer_parts.cpp`, `overlay.cpp`, `src/app/app.cpp`, `src/app/library_view.cpp` | none |
+| UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `viewer_parts.cpp`, `viewer_toggle.cpp`, `overlay.cpp`, `src/app/app.cpp`, `src/app/library_view.cpp` | none |
 | UI, fonts | `DejaVuSans.cpp`, `DejaVuSans-Bold.cpp`, generated from `assets/fonts` with `cmake -DINPUT=assets/fonts/DejaVuSans.ttf -DOUTPUT=DejaVuSans.cpp -DSYMBOL=kDejaVuSans -P cmake/embed_file.cmake` (and `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`) | or none of them and `RECOMP_ACH_NO_EMBEDDED_FONTS=1`; then pass `OverlayOptions::font` |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
 | UI, ImGui | `src/ui/imgui_renderer.cpp`, `achievement_list.cpp`, `popup_ui.cpp` | none (needs `imgui.h` on the include path) |
@@ -139,7 +139,7 @@ See [docs/app.md](docs/app.md), including its headless mode for recording videos
 
 - [JSON set format](docs/json-format.md) ([schema](schema/achievement-set.schema.json))
 - [Popup styles and sounds](docs/styling.md)
-- [Achievement overlay without ImGui](docs/overlay.md)
+- [Achievement overlay without ImGui](docs/overlay.md), and [what an ImGui game wires to match it](docs/imgui-hosts.md)
 - [The shared achievement library](docs/library.md): its format, privacy, Proton and sync
 - [The desktop app](docs/app.md) and [launching games](docs/launching.md)
 - [Xbox 360 / rexglue](docs/xbox360.md), including [splitting off unsupported achievements](docs/xbox360.md#splitting-off-achievements-the-recomp-cant-support)

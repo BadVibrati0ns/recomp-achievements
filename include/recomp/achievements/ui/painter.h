@@ -75,6 +75,9 @@ struct PopupRect {
 
 // Style sizes * this = pixels for a display of the given size.
 float PopupScale(const Style& style, Vec2 display_size);
+// The least scale a display this tall gets (the style's small_screen_* rule);
+// 0 above small_screen_height or when it's off.
+float SmallScreenScale(const Style& style, float display_height);
 // The card height the built-in look needs for this popup at scale s.
 float MeasurePopupHeight(const ActivePopup& popup, float s, const TextMeasurer& m);
 // One popup at a stack offset in pixels (0 = nearest its anchor).

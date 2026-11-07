@@ -14,6 +14,7 @@
 #include "recomp/achievements/ui/notification_center.h"
 #include "recomp/achievements/ui/sound_player.h"
 #include "recomp/achievements/ui/style.h"
+#include "recomp/achievements/ui/viewer_toggle.h"
 
 namespace recomp::achievements::ui {
 
@@ -40,6 +41,11 @@ struct PopupUiOptions {
   IconCache::CreateTexture create_texture;
   IconCache::DestroyTexture destroy_texture;
   bool sounds = true;
+  // The list window's toggle, the same as Overlay's (HandleInput()): F8 or
+  // Start + LB unless the player's "viewer" style keys say otherwise.
+  std::string toggle_key = "F8";
+  std::string toggle_pad = "start+lb";
+  float chord_grace = 0.15f;
 };
 
 class PopupUi {
@@ -59,8 +65,23 @@ class PopupUi {
   // Re-reads both style files and drops cached sounds (e.g. after the user edits them).
   bool ReloadStyles(std::string* error = nullptr);
 
-  // Per frame, inside the ImGui frame: popups, plus the list when *list_open.
-  void Draw(bool* list_open = nullptr);
+  // The list window's toggle, handled as the software overlay handles it
+  // (docs/imgui-hosts.md). Once per frame, before Draw(), with the raw input:
+  // F8 or Start + LB opens and closes the list. True on the frame it toggled.
+  bool HandleInput(float dt, const OverlayInput& input);
+  // What the game should see this frame: nothing while the list is open (or
+  // until the keys that closed it are let go), the toggle key removed, the
+  // chord's buttons held back for chord_grace.
+  OverlayInput GameInput(const OverlayInput& raw) const;
+  bool wants_input() const { return toggle_.wants_input(list_open_); }
+  bool list_open() const { return list_open_; }
+  void SetListOpen(bool open);
+  ViewerToggle& toggle() { return toggle_; }
+
+  // Per frame, inside the ImGui frame: popups, plus the list while it's open
+  // (list_open(), or *list_open for hosts that keep their own flag).
+  void Draw();
+  void Draw(bool* list_open);
 
  private:
   System& system_;
@@ -72,6 +93,10 @@ class PopupUi {
   ImGuiRenderer renderer_;
   AchievementListWindow list_;
   std::unique_ptr<Library> library_;
+  ViewerToggle toggle_;
+  bool list_open_ = false;
+  bool back_held_ = false;  // B / Esc last frame: closing needs a fresh press.
+  uint64_t bindings_generation_ = 0;
 };
 
 }  // namespace recomp::achievements::ui

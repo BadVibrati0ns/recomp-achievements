@@ -5,6 +5,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <memory>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -453,3 +455,108 @@ TEST(sdl_image_decoder) {
 }
 
 #endif
+
+// ---- PopupUi's list toggle: the same rules as the software overlay ----------------
+
+namespace {
+
+struct ToggleRig {
+  Context ctx;
+  System system;
+  std::unique_ptr<PopupUi> ui;
+  ToggleRig() {
+    system.AddSet(MakeSet("t", Platform::kCustom));
+    PopupUiOptions o;
+    o.global_preferences = false;
+    o.sounds = false;
+    ui = std::make_unique<PopupUi>(system, o);
+  }
+  // One frame: input, then the ImGui frame with the list.
+  OverlayInput Step(const OverlayInput& in = {}) {
+    ui->HandleInput(1.0f / 60, in);
+    Frame([&] { ui->Draw(); });
+    return ui->GameInput(in);
+  }
+};
+
+OverlayInput Keys(const std::function<void(OverlayInput&)>& set) {
+  OverlayInput in;
+  set(in);
+  return in;
+}
+
+}  // namespace
+
+TEST(popup_ui_f8_opens_and_closes_the_list) {
+  ToggleRig r;
+  CHECK(!r.ui->list_open());
+  const auto f8 = Keys([](OverlayInput& in) { in.f[8] = true; });
+  OverlayInput game = r.Step(f8);
+  CHECK(r.ui->list_open());
+  CHECK(!game.f[8]);
+  CHECK(r.ui->wants_input());
+  r.Step();
+  // Keys reach the list, not the game.
+  game = r.Step(Keys([](OverlayInput& in) { in.down = true; }));
+  CHECK(!game.down);
+  r.Step(f8);
+  CHECK(!r.ui->list_open());
+  // Still latched while F8 is held after closing; free once released.
+  CHECK(r.ui->wants_input());
+  r.Step();
+  CHECK(!r.ui->wants_input());
+  game = r.Step(Keys([](OverlayInput& in) { in.down = true; }));
+  CHECK(game.down);
+}
+
+TEST(popup_ui_chord_and_grace) {
+  ToggleRig r;
+  // LB alone is held back from the game for the grace time, then let through.
+  OverlayInput lb = Keys([](OverlayInput& in) { in.pad_lb = true; });
+  OverlayInput game = r.Step(lb);
+  CHECK(!game.pad_lb);
+  for (int i = 0; i < 12; ++i) game = r.Step(lb);
+  CHECK(game.pad_lb);
+  r.Step();
+  // LB then Start: the chord opens the list, and the game never saw LB.
+  game = r.Step(lb);
+  CHECK(!game.pad_lb);
+  r.Step(Keys([](OverlayInput& in) { in.pad_lb = in.pad_start = true; }));
+  CHECK(r.ui->list_open());
+  // B closes it, as in the overlay.
+  r.Step();
+  r.Step(Keys([](OverlayInput& in) { in.pad_b = true; }));
+  CHECK(!r.ui->list_open());
+  r.Step();
+  // A quick tap of LB (shorter than the grace) reaches the game as a tap.
+  r.Step(lb);
+  game = r.Step();
+  CHECK(game.pad_lb);
+}
+
+TEST(popup_ui_player_rebinds_the_toggle) {
+  ToggleRig r;
+  r.ui->styles().SetGlobalStyle(nlohmann::json::parse(R"({"viewer": {"key": "F9", "pad": "back+rb"}})"));
+  r.Step(Keys([](OverlayInput& in) { in.f[8] = true; }));
+  CHECK(!r.ui->list_open());
+  r.Step();
+  r.Step(Keys([](OverlayInput& in) { in.f[9] = true; }));
+  CHECK(r.ui->list_open());
+  r.Step();
+  r.Step(Keys([](OverlayInput& in) { in.pad_back = in.pad_rb = true; }));
+  CHECK(!r.ui->list_open());
+}
+
+TEST(popup_ui_close_button_closes_and_latches) {
+  ToggleRig r;
+  r.ui->SetListOpen(true);
+  r.Step();
+  CHECK(r.ui->list_open());
+  r.ui->SetListOpen(false);
+  CHECK(!r.ui->list_open());
+  // A host's own close (or the window's X) latches like the toggle.
+  OverlayInput held = Keys([](OverlayInput& in) { in.enter = true; });
+  CHECK(!r.Step(held).enter);
+  r.Step();
+  CHECK(r.Step(held).enter);
+}

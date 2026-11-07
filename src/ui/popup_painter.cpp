@@ -134,8 +134,14 @@ std::vector<std::string> WrapText(const TextMeasurer& m, bool bold, float size, 
   return lines;
 }
 
+float SmallScreenScale(const Style& st, float height) {
+  if (st.small_screen_height <= 0.0f || height <= 0.0f) return 0.0f;
+  return st.small_screen_scale * std::min(1.0f, height / st.small_screen_height);
+}
+
 float PopupScale(const Style& st, Vec2 size) {
-  return std::clamp(size.y / std::max(1.0f, st.reference_height), st.min_scale, st.max_scale) * st.scale;
+  const float s = std::max(size.y / std::max(1.0f, st.reference_height), SmallScreenScale(st, size.y));
+  return std::clamp(s, st.min_scale, st.max_scale) * st.scale;
 }
 
 float MeasurePopupHeight(const ActivePopup& popup, float s, const TextMeasurer& m) {

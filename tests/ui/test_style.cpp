@@ -1,7 +1,9 @@
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
+#include "recomp/achievements/ui/painter.h"
 #include "recomp/achievements/ui/style.h"
 #include "test.h"
 
@@ -377,3 +379,20 @@ TEST(global_config_dir_and_template) {
   if (home) setenv("HOME", saved_home.c_str(), 1);
 }
 #endif
+
+TEST(style_small_screens_keep_their_size) {
+  StyleManager m;
+  auto st = m.Resolve(nullptr);
+  const auto near = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+  // A Steam Deck's 800 lines stay at 1 instead of 800 / 1080.
+  CHECK(near(PopupScale(*st, {1280, 800}), 1.0f));
+  CHECK(near(PopupScale(*st, {1280, 720}), 0.9f));  // Under it, in proportion.
+  CHECK(near(PopupScale(*st, {1920, 1080}), 1.0f));
+  CHECK(near(PopupScale(*st, {2560, 1440}), 1440.0f / 1080.0f));
+  CHECK(near(SmallScreenScale(*st, 1080), 1.0f));  // Above it the height rule wins anyway.
+  // The player can make handheld popups larger, or turn the rule off.
+  m.SetGlobalStyle(nlohmann::json::parse(R"({"small_screen_scale": 1.3})"));
+  CHECK(near(PopupScale(*m.Resolve(nullptr), {1280, 800}), 1.3f));
+  m.SetGlobalStyle(nlohmann::json::parse(R"({"small_screen_height": 0})"));
+  CHECK(near(PopupScale(*m.Resolve(nullptr), {1280, 800}), 800.0f / 1080.0f));
+}

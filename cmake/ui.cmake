@@ -23,6 +23,7 @@ add_library(recomp_achievements_ui_base STATIC
     ${_ach_ui_src}/popup_painter.cpp
     ${_ach_ui_src}/canvas.cpp
     ${_ach_ui_src}/viewer_parts.cpp
+    ${_ach_ui_src}/viewer_toggle.cpp
     ${_ach_ui_src}/overlay.cpp
     # Every game's library (the desktop app's grid, and the viewer's All games page).
     ${_ach_ui_src}/../app/app.cpp

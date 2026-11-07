@@ -678,6 +678,8 @@ class Patcher {
       else if (k == "reference_height") Num(v, sp, s.reference_height, 100.0f, 10000.0f);
       else if (k == "min_scale") Num(v, sp, s.min_scale, 0.05f, 10.0f);
       else if (k == "max_scale") Num(v, sp, s.max_scale, 0.05f, 20.0f);
+      else if (k == "small_screen_height") Num(v, sp, s.small_screen_height, 0.0f, 10000.0f);
+      else if (k == "small_screen_scale") Num(v, sp, s.small_screen_scale, 0.1f, 10.0f);
       else if (k == "max_queued") Int(v, sp, s.max_queued, 1, 1000);
       else if (k == "font") Str(v, sp, s.font);
       else if (k == "font_bold") Str(v, sp, s.font_bold);
@@ -851,6 +853,8 @@ json StyleToJson(const Style& s) {
   j["reference_height"] = s.reference_height;
   j["min_scale"] = s.min_scale;
   j["max_scale"] = s.max_scale;
+  j["small_screen_height"] = s.small_screen_height;
+  j["small_screen_scale"] = s.small_screen_scale;
   j["max_queued"] = s.max_queued;
   j["font"] = s.font;
   j["font_bold"] = s.font_bold;

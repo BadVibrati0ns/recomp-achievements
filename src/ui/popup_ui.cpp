@@ -1,5 +1,7 @@
 #include "recomp/achievements/ui/popup_ui.h"
 
+#include <imgui.h>
+
 #include "recomp/achievements/ui/sdl_support.h"
 
 namespace recomp::achievements::ui {
@@ -8,7 +10,8 @@ PopupUi::PopupUi(System& system, PopupUiOptions options)
     : system_(system),
       options_(std::move(options)),
       renderer_(center_, &icons_),
-      list_(system, &icons_) {
+      list_(system, &icons_),
+      toggle_({options_.toggle_key, options_.toggle_pad, options_.chord_grace}) {
   std::filesystem::path global_dir;
   if (options_.global_preferences) {
     global_dir = options_.create_global_preferences ? EnsureGlobalConfigDir() : GlobalConfigDir();
@@ -51,6 +54,39 @@ bool PopupUi::ReloadStyles(std::string* error) {
   const bool ok = styles_.Reload(error);
   sound_.bank().ClearCache();
   return ok;
+}
+
+bool PopupUi::HandleInput(float dt, const OverlayInput& input) {
+  // The player's "viewer" keys, re-read when the styles change.
+  if (styles_.generation() != bindings_generation_) {
+    bindings_generation_ = styles_.generation();
+    toggle_.ApplyStyle(styles_.Resolve(nullptr)->viewer);
+  }
+  const bool toggled = toggle_.Update(dt, input, list_open_);
+  if (toggled) SetListOpen(!list_open_);
+  // B / Esc closes it too, as in the overlay, unless one of its dialogs is
+  // open (ImGui closes that first).
+  else if (list_open_ && (input.pad_b || input.escape) && !back_held_ && !list_.settings_open() &&
+           !(ImGui::GetCurrentContext() && ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)))
+    SetListOpen(false);
+  back_held_ = input.pad_b || input.escape;
+  return toggled;
+}
+
+OverlayInput PopupUi::GameInput(const OverlayInput& raw) const { return toggle_.GameInput(raw, list_open_); }
+
+void PopupUi::SetListOpen(bool open) {
+  if (open == list_open_) return;
+  list_open_ = open;
+  if (!open) toggle_.Closed();
+}
+
+void PopupUi::Draw() {
+  renderer_.Draw();
+  if (!list_open_) return;
+  bool open = true;
+  list_.Draw(&open);
+  if (!open) SetListOpen(false);  // Its close button.
 }
 
 void PopupUi::Draw(bool* list_open) {

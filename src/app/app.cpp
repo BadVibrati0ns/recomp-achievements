@@ -222,7 +222,7 @@ struct App::Impl {
   // Steam Deck), so text stays readable on small screens.
   float BaseScale() const {
     const float h = static_cast<float>(height);
-    return std::max(h / 1080.0f, std::min(1.0f, h / 800.0f)) * options.scale;
+    return std::max(h / 1080.0f, SmallScreenScale(*AppStyle(), h)) * options.scale;
   }
   float Scale() const { return std::max(0.75f, BaseScale() * AppStyle()->viewer.scale); }
 

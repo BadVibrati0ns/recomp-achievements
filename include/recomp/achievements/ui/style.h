@@ -173,6 +173,11 @@ struct Style {
   float scale = 1.0f;
   float reference_height = 1080.0f;  // Sizes scale with display height / this.
   float min_scale = 0.6f, max_scale = 2.5f;
+  // Small screens (a Steam Deck's 800 lines): at or under this height, sizes
+  // don't shrink below small_screen_scale (times height / small_screen_height
+  // under it), so popups and the viewer stay readable on a handheld. 0: off.
+  float small_screen_height = 800.0f;
+  float small_screen_scale = 1.0f;
   int max_queued = 16;  // Waiting unlock popups; older ones are dropped beyond this.
   std::string font, font_bold;  // Names registered with the renderer; "" = default.
 

@@ -1,6 +1,7 @@
 #include "recomp/achievements/ui/overlay.h"
 
 #include "recomp/achievements/app/app.h"
+#include "recomp/achievements/ui/viewer_toggle.h"
 
 #include <algorithm>
 #include <atomic>
@@ -325,8 +326,8 @@ struct Overlay::Impl {
 
   // Bindings, re-read when the styles change.
   uint64_t bindings_generation = 0;
-  int toggle_key = 8;
-  uint32_t toggle_chord = kPadStart | kPadLB;
+  ViewerToggle toggle;  // F8 / Start + LB, and what the game sees (viewer_toggle.h).
+  uint32_t toggle_chord = kPadStart | kPadLB;  // toggle.chord(), for the undo.
   ButtonLabels labels = ButtonLabels::kXbox;
   bool labels_from_style = false;
 
@@ -335,13 +336,8 @@ struct Overlay::Impl {
   bool prev_mouse = false;
   float prev_mouse_x = -1, prev_mouse_y = -1;
   uint32_t latched_pad = 0, latched_keys = 0;
-  bool chord_held = false;
   // What the game sees (GameInput): chord buttons held back, taps to replay,
   // and a latch after closing until everything is released.
-  uint32_t held_back = 0;
-  float held_back_t = 0.0f;
-  uint32_t tap = 0;
-  bool release_latch = false;
   bool shown = false;  // visible() as of the last returned image.
   bool stick_x_held = false;
   int repeat_dir = 0;  // -1 up, +1 down.
@@ -437,6 +433,7 @@ struct Overlay::Impl {
   PixelRect popup_area;
 
   Impl(System& sys, OverlayOptions opt) : system(sys), options(std::move(opt)) {
+    toggle = ViewerToggle({options.toggle_key, options.toggle_pad, options.chord_grace});
     if (options.center) {
       center = options.center;
     } else {
@@ -522,7 +519,12 @@ struct Overlay::Impl {
 
   // ---- Scale and theme ---------------------------------------------------------
 
-  float BaseScale() const { return ui_scale > 0 ? ui_scale : height / 1080.0f; }
+  // The game's ui_scale, else height / 1080, but never under the style's
+  // small-screen minimum (a Steam Deck's 800 lines stay at 1).
+  float BaseScale() const {
+    if (ui_scale > 0) return ui_scale;
+    return std::max(height / 1080.0f, SmallScreenScale(*styles->Resolve(nullptr), static_cast<float>(height)));
+  }
 
   const AchievementSet* TabSet() const {
     if (listed.empty()) return all_sets.empty() ? nullptr : all_sets.front();
@@ -917,14 +919,8 @@ struct Overlay::Impl {
     if (gen == bindings_generation) return;
     bindings_generation = gen;
     const auto st = styles->Resolve(nullptr);
-    int key = 0;
-    if (!ParseToggleKey(st->viewer.key.empty() ? options.toggle_key : st->viewer.key, key))
-      ParseToggleKey(options.toggle_key, key);
-    toggle_key = key;
-    uint32_t chord = 0;
-    if (!ParsePadChord(st->viewer.pad.empty() ? options.toggle_pad : st->viewer.pad, chord))
-      ParsePadChord(options.toggle_pad, chord);
-    toggle_chord = chord;
+    toggle.ApplyStyle(st->viewer);
+    toggle_chord = toggle.chord();
     const std::string b = Lower(st->viewer.buttons);
     if (b == "playstation" || b == "ps" || b == "ps3") labels = ButtonLabels::kPlayStation, labels_from_style = true;
     else if (b == "xbox" || b == "xbox360") labels = ButtonLabels::kXbox, labels_from_style = true;
@@ -973,12 +969,8 @@ struct Overlay::Impl {
   // One frame of the page. False once it has closed (the viewer draws).
   bool BrowserFrame(float dt, const OverlayInput& in, bool& changed) {
     const uint32_t pad = PadButtons(in), keys = KeyBits(in), fkeys = FKeyBits(in);
-    const uint32_t pad_down = pad & ~prev_pad, f_down = fkeys & ~prev_fkeys;
     // The toggle closes everything, as from the viewer.
-    bool toggled = toggle_key > 0 && (f_down & (1u << toggle_key));
-    const bool chord_full = toggle_chord && (pad & toggle_chord) == toggle_chord;
-    if (chord_full && !chord_held && (pad_down & toggle_chord)) toggled = true;
-    chord_held = chord_full;
+    const bool toggled = toggle.Update(dt, in, true);
     prev_pad = pad;
     prev_keys = keys;
     prev_fkeys = fkeys;
@@ -1023,7 +1015,7 @@ struct Overlay::Impl {
       credits_screen = false;
       settings_screen = false;
       reset_mode = false;
-      release_latch = true;
+      toggle.Closed();
       if (browser_open) CloseBrowser();
     }
     ClearHold();
@@ -1275,45 +1267,19 @@ struct Overlay::Impl {
     if (device != before && open) viewer_dirty = true;
     undo.age += dt;
 
-    // Game-facing input. Taps are reported for one frame only.
-    tap = 0;
-    if (release_latch && !open && !pad && !keys && !fkeys && !(in.mouse_present && in.mouse_left) &&
-        !stick) {
-      release_latch = false;
+    // The toggle, and what the game sees (held-back chord buttons, taps).
+    const bool toggled = toggle.Update(dt, in, open);
+    if (toggled && toggle.fired_by_chord() && open && undo.age < 0.5f) {
+      // The chord's first button already moved the list; put it back.
+      tab = undo.tab;
+      filter = undo.filter;
+      reveal = undo.reveal;
+      selected = undo.selected;
+      credits_screen = undo.credits;
+      settings_screen = undo.settings;
+      reset_mode = undo.reset_mode;
+      model_stale = true;
     }
-    if (!open && options.chord_grace > 0.0f && toggle_chord) {
-      held_back_t += dt;
-      const uint32_t released = held_back & ~pad;
-      held_back &= pad;
-      const uint32_t fresh = pad_down & toggle_chord;
-      if (fresh) {
-        if (!held_back) held_back_t = 0.0f;
-        held_back |= fresh;
-      }
-      if (held_back && held_back_t >= options.chord_grace) held_back = 0;  // Not a chord: let it through.
-      tap = released;
-    }
-
-    // The toggle. The chord fires once when its last button goes down, in
-    // any order; holding it doesn't repeat.
-    bool toggled = false;
-    if (toggle_key > 0 && (f_down & (1u << toggle_key))) toggled = true;
-    const bool chord_full = toggle_chord && (pad & toggle_chord) == toggle_chord;
-    if (chord_full && !chord_held && (pad_down & toggle_chord)) {
-      toggled = true;
-      if (open && undo.age < 0.5f) {
-        // The chord's first button already moved the list; put it back.
-        tab = undo.tab;
-        filter = undo.filter;
-        reveal = undo.reveal;
-        selected = undo.selected;
-        credits_screen = undo.credits;
-        settings_screen = undo.settings;
-        reset_mode = undo.reset_mode;
-        model_stale = true;
-      }
-    }
-    chord_held = chord_full;
 
     prev_pad = pad;
     prev_keys = keys;
@@ -1327,8 +1293,6 @@ struct Overlay::Impl {
       SetOpen(!open);
       latched_pad = pad;
       latched_keys = keys;
-      held_back = 0;
-      tap = 0;
       return;
     }
     if (!open) return;
@@ -2517,23 +2481,9 @@ void Overlay::OpenSettings() {
 void Overlay::Close() { impl_->SetOpen(false); }
 void Overlay::Toggle() { impl_->SetOpen(!impl_->open); }
 bool Overlay::is_open() const { return impl_->open; }
-bool Overlay::wants_input() const { return impl_->open || impl_->release_latch; }
+bool Overlay::wants_input() const { return impl_->toggle.wants_input(impl_->open); }
 
-OverlayInput Overlay::GameInput(const OverlayInput& raw) const {
-  const Impl& m = *impl_;
-  if (m.open || m.release_latch) {
-    OverlayInput none;
-    none.mouse_present = raw.mouse_present;
-    none.mouse_x = raw.mouse_x;
-    none.mouse_y = raw.mouse_y;
-    return none;
-  }
-  OverlayInput out = raw;
-  if (m.toggle_key > 0 && m.toggle_key < 13) out.f[m.toggle_key] = false;
-  SetPadButtons(out, m.held_back, false);
-  SetPadButtons(out, m.tap, true);
-  return out;
-}
+OverlayInput Overlay::GameInput(const OverlayInput& raw) const { return impl_->toggle.GameInput(raw, impl_->open); }
 
 void Overlay::SetButtonLabels(ButtonLabels labels) {
   impl_->options.buttons = labels;

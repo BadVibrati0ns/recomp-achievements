@@ -110,6 +110,9 @@ top (triangle).
 
 ## Bindings and controls
 
+The toggle and the input the game sees are `ui::ViewerToggle` (`viewer_toggle.h`). ImGui games use the
+same one through `PopupUi::HandleInput()` ([imgui-hosts.md](imgui-hosts.md)).
+
 The viewer toggles with **F8** and with **Start + LB** (Options + L1). The chord fires once when its last
 button goes down, in either order, and holding it doesn't repeat. Buttons still held when the viewer
 opens do nothing until they're released. When LB was pressed first while the viewer was open, it may have
