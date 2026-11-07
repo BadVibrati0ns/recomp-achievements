@@ -111,6 +111,9 @@ struct Library::Impl {
   std::string last_game_json;
   bool snapshot_dirty = false;
   Clock::time_point last_snapshot{};
+  bool launch_recorded = false;
+  json launch;  // game.json's "launch", null when not recorded.
+  std::optional<RunningMarker> marker;  // Ours, written to running.json.
 
   Impl(System& sys, LibraryOptions opt) : system(sys), options(std::move(opt)) {}
 
@@ -273,7 +276,36 @@ struct Library::Impl {
     }
   }
 
+  // How this process was started, and the running.json marker, once.
+  void RecordLaunch() {
+    launch_recorded = true;
+    if (options.record_launch) {
+      LaunchInfo info = CurrentLaunchInfo();
+      if (!options.launch.exe.empty()) {
+        info.exe = options.launch.exe;
+        info.args = options.launch.args;
+        if (!options.launch.cwd.empty()) info.cwd = options.launch.cwd;
+      }
+      if (!info.empty()) launch = LaunchToJson(info);
+    }
+    if (options.running_marker) {
+      marker = CurrentRunningMarker();
+      if (marker && !Write(dir / "running.json", MarkerToJson(*marker))) marker.reset();
+    }
+  }
+
+  // Removes running.json if it is still ours (a second copy may have
+  // written its own since).
+  void ClearMarker() {
+    if (!marker) return;
+    const auto on_disk = MarkerFromJson(detail::ReadJsonFile(dir / "running.json"));
+    std::error_code ec;
+    if (on_disk && on_disk->pid == marker->pid && on_disk->start == marker->start) fs::remove(dir / "running.json", ec);
+    marker.reset();
+  }
+
   void WorkLocked(bool force) {
+    if (!launch_recorded) RecordLaunch();
     std::vector<LibraryEvent> events;
     {
       std::lock_guard lock(shared->mutex);
@@ -639,6 +671,7 @@ struct Library::Impl {
                 {"install_id", install_id},
                 {"sets", set_ids}};
     if (wine) doc["wine"] = true;
+    if (!launch.is_null()) doc["launch"] = ojson::parse(launch.dump());
     const std::string compare = doc.dump();
     // last_played changes every time; only it changing isn't worth a write
     // until the session ends.
@@ -663,6 +696,8 @@ Library::~Library() {
   if (!impl_->active) return;
   impl_->Stop();
   impl_->Work(true);
+  std::lock_guard lock(impl_->io_mutex);
+  impl_->ClearMarker();
 }
 
 void Library::Flush() {

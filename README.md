@@ -22,6 +22,9 @@ list of its own.
   append-only event log, in a shared folder next to the player's preferences, so a desktop app can
   show every recomp's achievements without reading any game's files. A Windows build under Proton
   writes to the Linux host's folder. See [docs/library.md](docs/library.md).
+- **Launching games:** the app starts any game in the library through Steam or directly, and
+  remembers the choice for each game. It finds a Steam shortcut added after the game first ran, and
+  won't start a second copy of a game that is already running. See [docs/launching.md](docs/launching.md).
 - **Player settings, in game:** the viewer's settings page turns each achievement set on and off (a set
   that's off hides its points, can't unlock and keeps its progress; sets can start off), resets chosen
   achievements, a set or everything behind a hold-to-confirm, and sets the popup sound and volume. The
@@ -33,7 +36,7 @@ list of its own.
 
 | CMake target | What it does | Needs |
 |---|---|---|
-| `recomp::achievements` | Registry, JSON sets, triggers, saves, the shared achievement library (writer and reader) | threads (nlohmann/json is bundled) |
+| `recomp::achievements` | Registry, JSON sets, triggers, saves, the shared achievement library (writer and reader), launching games | threads (nlohmann/json is bundled) |
 | `recomp::achievements_ui` | Popups, list window, styles, sounds, icons | Dear ImGui and SDL3 targets (each optional) |
 | `recomp::achievements_ui_base` | The renderer-agnostic part: popup queue, styles, synthesized sounds, WAV and PNG decoding, and the software overlay (viewer + popups, `Canvas`, fonts) | nothing (stb_truetype and DejaVu Sans are bundled) |
 | `recomp::achievements_xbox` | XDBF / SPA reader, title update search | nothing |
@@ -56,7 +59,7 @@ path. Compile these sources and set these defines:
 
 | Part | Sources | Defines |
 |---|---|---|
-| core | `src/system.cpp`, `src/json_format.cpp`, `src/config_dir.cpp`, `src/library.cpp`, `src/library_reader.cpp`, `src/library_util.cpp` (link the platform's threads library, e.g. `-pthread`) | none |
+| core | `src/system.cpp`, `src/json_format.cpp`, `src/config_dir.cpp`, `src/library.cpp`, `src/library_reader.cpp`, `src/library_util.cpp`, `src/launch.cpp` (link the platform's threads library, e.g. `-pthread`; on Windows also `shell32` and `advapi32`) | none |
 | UI, base | `src/ui/style.cpp`, `notification_center.cpp`, `notification_attach.cpp`, `sounds.cpp`, `icon_cache.cpp`, `builtin_decoders.cpp`, `popup_painter.cpp`, `canvas.cpp`, `viewer_parts.cpp`, `overlay.cpp` | none |
 | UI, fonts | `DejaVuSans.cpp`, `DejaVuSans-Bold.cpp`, generated from `assets/fonts` with `cmake -DINPUT=assets/fonts/DejaVuSans.ttf -DOUTPUT=DejaVuSans.cpp -DSYMBOL=kDejaVuSans -P cmake/embed_file.cmake` (and `DejaVuSans-Bold.ttf` / `kDejaVuSansBold`) | or none of them and `RECOMP_ACH_NO_EMBEDDED_FONTS=1`; then pass `OverlayOptions::font` |
 | UI, SDL3 | `src/ui/sound_player.cpp`, `sdl_support.cpp` | `RECOMP_ACH_HAS_SDL3=1` (0 builds them as no-ops) |
@@ -119,7 +122,8 @@ from the shared library: a grid of games with progress, totals over the sets tha
 unlocks and four sort orders, and each game's page drawn by the same viewer as in game, with sets
 that are off listed as Off and a profile picker. It updates live while a game runs, works with
 keyboard, mouse or controller (a Steam Deck in Game Mode included), finds libraries in Proton
-prefixes, only reads, and never uses the network. It is off by default:
+prefixes, starts games through Steam or directly ([docs/launching.md](docs/launching.md)), only
+reads the library, and never uses the network. It is off by default:
 
 ```sh
 cmake -S . -B build-app -G Ninja -DRECOMP_ACH_APP=ON -DRECOMP_ACH_SDL3_SOURCE_DIR=/path/to/SDL3
@@ -136,7 +140,7 @@ See [docs/app.md](docs/app.md), including its headless mode for recording videos
 - [Popup styles and sounds](docs/styling.md)
 - [Achievement overlay without ImGui](docs/overlay.md)
 - [The shared achievement library](docs/library.md): its format, privacy, Proton and sync
-- [The desktop app](docs/app.md)
+- [The desktop app](docs/app.md) and [launching games](docs/launching.md)
 - [Xbox 360 / rexglue](docs/xbox360.md), including [splitting off unsupported achievements](docs/xbox360.md#splitting-off-achievements-the-recomp-cant-support)
 - [PS3 trophies](docs/ps3.md)
 - [RetroAchievements lists](docs/retroachievements.md) and the [import tool](tools/README.md)

@@ -32,6 +32,7 @@ struct Args {
   std::string script, frames_out;
   float fps = 30.0f;
   float quit_after = 0.0f;  // Windowed: close after this many seconds (smoke tests).
+  std::filesystem::path steam_home, launcher_prefs;
 };
 
 int Usage() {
@@ -43,6 +44,9 @@ int Usage() {
                "  --scale X            text and layout scale on top of the window's\n"
                "  --fullscreen         start fullscreen (F11 toggles)\n"
                "  --no-preferences     ignore the player's achievements_style.json\n"
+               "  --steam-home DIR     look for Steam shortcuts under DIR instead of $HOME\n"
+               "  --launcher-prefs FILE  keep launch choices in FILE (default:\n"
+               "                       launcher.json in the player's folder)\n"
                "  --headless --script FILE --frames-out FILE|-\n"
                "                       run FILE's scripted input without a window and write\n"
                "                       raw RGB24 frames (see apps/achievements/script.h)\n"
@@ -68,6 +72,8 @@ bool ParseArgs(int argc, char** argv, Args& a) {
     else if (k == "--script" && (v = value())) a.script = v;
     else if (k == "--frames-out" && (v = value())) a.frames_out = v;
     else if (k == "--quit-after" && (v = value())) a.quit_after = static_cast<float>(std::atof(v));
+    else if (k == "--steam-home" && (v = value())) a.steam_home = v;
+    else if (k == "--launcher-prefs" && (v = value())) a.launcher_prefs = v;
     else if (k == "--fullscreen") a.fullscreen = true;
     else if (k == "--headless") a.headless = true;
     else if (k == "--no-preferences") a.global_preferences = false;
@@ -81,6 +87,14 @@ AppOptions MakeOptions(const Args& a) {
   o.roots = a.roots;
   o.scale = a.scale;
   o.global_preferences = a.global_preferences;
+  o.launcher_prefs = a.launcher_prefs;
+  if (!a.steam_home.empty())
+    o.shortcuts = [home = a.steam_home] {
+      std::vector<SteamShortcut> all;
+      for (const auto& f : FindSteamShortcutFiles(home))
+        for (auto& s : ReadSteamShortcuts(f)) all.push_back(std::move(s));
+      return all;
+    };
   return o;
 }
 

@@ -121,6 +121,7 @@ or the hardware. The player may add `"hash_profiles": true` to hash profile ids 
   "sdk_version": "0.1.0",
   "install_id": "dad51cb8-0275-4a34-9050-238b11687327",
   "sets": ["my_game", "my_game_online"],
+  "launch": { "os": "linux", "exe": "/home/deck/Games/my_game/my_game", "args": [], "cwd": "/home/deck/Games/my_game" },
   "last_played": 1793992905
 }
 ```
@@ -128,7 +129,9 @@ or the hardware. The player may add `"hash_profiles": true` to hash profile ids 
 `icon` is a path inside the entry, or null. `sets` lists the sets the game had loaded last, in load
 order: a set file whose id isn't listed belongs to a set the game no longer loads (a removed mod) and
 is kept but not shown. `last_played` (unix seconds) is written when the game starts and when it exits.
-`"wine": true` marks a Windows build that ran under Wine or Proton.
+`"wine": true` marks a Windows build that ran under Wine or Proton. `launch` is how the game was
+last started, so the app can start it again ([launching.md](launching.md)). While the game runs,
+`running.json` next to `game.json` holds its process id and start time.
 
 ### `sets/<set id>.achievements.json`
 
@@ -229,8 +232,10 @@ The library is in the player's own config folder and never leaves the machine. W
   hashing a list of names without the install id, and the same name hashes differently on another
   machine.
 - Secret achievements and their text are stored in full; the app should hide them until unlocked.
-- No paths: icon refs are rewritten, the icon index is hashed, and nothing records where the game or
-  its saves are installed.
+- Paths: icon refs are rewritten and the icon index is hashed. `game.json`'s `launch` records the
+  game's executable, its arguments and its folder, so the app can start it again. Games that don't
+  want that set `record_launch = false` ([launching.md](launching.md)). Nothing records where the
+  saves are.
 - `install_id` is random and made once per library folder; delete `install.json` to get a new one.
 
 ## Wine and Proton

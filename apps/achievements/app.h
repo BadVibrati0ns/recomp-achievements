@@ -3,7 +3,9 @@
 // The library app without a window: every recomp's achievements from the
 // shared library (docs/library.md), drawn in software like the in-game
 // viewer. A games grid with totals and recent unlocks, and a game page that
-// is the overlay's viewer fed from the library. Reads only; never writes.
+// is the overlay's viewer fed from the library, and a Play menu that starts
+// games through Steam or directly (launch.h). Reads the library only; writes
+// nothing but the player's launch choices (launcher.json).
 // main.cpp puts it in an SDL3 window, or renders scripted input headless.
 
 #include <cstdint>
@@ -14,6 +16,7 @@
 #include <vector>
 
 #include "library_view.h"
+#include "recomp/achievements/launch.h"
 #include "recomp/achievements/ui/overlay.h"
 
 namespace recomp::achievements::app {
@@ -32,6 +35,13 @@ struct AppOptions {
   float poll_seconds = 1.0f;
   // Popups for unlocks and progress noticed while the app runs.
   bool popups = true;
+  // Launching games (docs/launching.md). Starts a command; null = StartDetached.
+  std::function<bool(const LaunchCommand& command, std::string* error)> start;
+  // Steam shortcuts, read each time the Play menu opens so one added since
+  // the game ran is found; null = every shortcuts.vdf (FindSteamShortcutFiles).
+  std::function<std::vector<SteamShortcut>()> shortcuts;
+  // The player's launch choices; empty = DefaultLauncherPrefsFile().
+  std::filesystem::path launcher_prefs;
 };
 
 class App {
@@ -70,6 +80,14 @@ class App {
     std::string profile;
     std::vector<std::string> profiles;
     ui::Overlay::ViewState page;
+    // The Play menu.
+    bool launch_menu = false;
+    std::string launch_game;
+    std::string launch_choice;  // "steam", "direct", or empty when neither can start it.
+    std::string launch_error;
+    std::vector<std::string> running;   // Game ids running now.
+    std::vector<std::string> starting;  // Started from here, not running yet.
+    std::vector<std::string> launched;  // Commands started, oldest first: argv (or the URL) joined by spaces.
     uint64_t reloads = 0;  // Times the library was read again.
     uint64_t popups = 0;   // Popups queued for changes seen.
   };

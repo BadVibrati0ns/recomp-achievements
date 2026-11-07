@@ -157,9 +157,11 @@ LibraryGame ReadGame(const fs::path& dir, const std::string& id, bool with_sets)
       for (const auto& s : *it)
         if (s.is_string()) g.set_ids.push_back(s.get<std::string>());
     }
+    if (const auto it = doc.find("launch"); it != doc.end()) g.launch = LaunchFromJson(*it);
   } else {
     g.warnings.push_back("no readable game.json");
   }
+  g.running = ReadRunningMarker(dir);
   if (g.title.empty()) g.title = id;
 
   std::vector<fs::path> files;

@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "recomp/achievements/config_dir.h"
+#include "recomp/achievements/launch.h"
 #include "recomp/achievements/types.h"
 
 namespace recomp::achievements {
@@ -81,6 +82,10 @@ struct LibraryGame {
   uint64_t last_played = 0;    // Unix seconds.
   bool wine = false;           // Written by a Windows build under Wine/Proton.
   std::vector<std::string> set_ids;  // The sets the game had loaded.
+  LaunchInfo launch;                 // How it was last started; empty if not recorded.
+  // running.json, if there is one. It may be left from a crash: check it
+  // with MarkerAlive() (PlanLaunch does).
+  std::optional<RunningMarker> running;
   std::vector<LibraryProfile> profiles;
   std::vector<LibrarySet> sets;  // LoadLibraryGame only.
   std::vector<std::string> warnings;

@@ -7,7 +7,9 @@
 #include <ctime>
 #include <functional>
 #include <map>
+#include <fstream>
 #include <memory>
+#include <thread>
 
 #include "recomp/achievements/library.h"
 #include "recomp/achievements/system.h"
@@ -434,8 +436,71 @@ void Apply(System& system, const Act& act) {
   else if (act.kind == "stat") system.ReportStat(act.key, act.value);
 }
 
+fs::path& Launcher() {
+  static fs::path exe;
+  return exe;
+}
+
+fs::path PlayScript(const fs::path& root, const std::string& id) {
+  return fs::absolute(root).parent_path() / "games" / id / "play.sh";
+}
+
+// A shell script per game, like a game's own executable.
+void WritePlayScript(const fs::path& root, const std::string& id) {
+  const fs::path script = PlayScript(root, id);
+  std::error_code ec;
+  fs::create_directories(script.parent_path(), ec);
+  std::ofstream out(script, std::ios::binary | std::ios::trunc);
+  out << "#!/bin/sh\n# A made-up game from the recomp-achievements demo library.\n"
+      << "exec '" << Launcher().string() << "' --run '" << fs::absolute(root).string() << "' " << id << " \"$@\"\n";
+  out.close();
+  fs::permissions(script, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                              fs::perms::others_read | fs::perms::others_exec, ec);
+}
+
+// A binary shortcuts.vdf with one non-Steam game, as Steam writes it.
+void WriteSteamShortcut(const fs::path& root, const std::string& id, const std::string& name) {
+  std::vector<uint8_t> b;
+  const auto key = [&](uint8_t type, const std::string& k) {
+    b.push_back(type);
+    b.insert(b.end(), k.begin(), k.end());
+    b.push_back(0);
+  };
+  const auto str = [&](const std::string& k, const std::string& v) {
+    key(0x01, k);
+    b.insert(b.end(), v.begin(), v.end());
+    b.push_back(0);
+  };
+  const auto u32 = [&](const std::string& k, uint32_t v) {
+    key(0x02, k);
+    for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i)));
+  };
+  const fs::path script = PlayScript(root, id);
+  key(0x00, "shortcuts");
+  key(0x00, "0");
+  u32("appid", 0xB0E1D0A5u);
+  str("AppName", name);
+  str("Exe", "\"" + script.string() + "\"");
+  str("StartDir", "\"" + script.parent_path().string() + "\"");
+  str("LaunchOptions", "");
+  key(0x00, "tags");
+  b.push_back(0x08);
+  b.push_back(0x08);
+  b.push_back(0x08);
+  b.push_back(0x08);
+  const fs::path file = DemoSteamHome(root) / ".local" / "share" / "Steam" / "userdata" / "10001" / "config" / "shortcuts.vdf";
+  std::error_code ec;
+  fs::create_directories(file.parent_path(), ec);
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
+}
+
 LibraryOptions OptionsFor(const Game& g, const fs::path& root) {
   LibraryOptions o;
+  if (!Launcher().empty()) {
+    o.launch.exe = PlayScript(root, g.id).string();
+    o.launch.cwd = PlayScript(root, g.id).parent_path().string();
+  }
   o.game_id = g.id;
   o.title = g.title;
   o.version = g.version;
@@ -459,6 +524,11 @@ bool WriteDemoLibrary(const fs::path& root, const fs::path& saves, uint64_t now,
   std::error_code ec;
   fs::create_directories(root, ec);
   auto games = AllGames();
+  if (!Launcher().empty()) {
+    for (const Game& g : games) WritePlayScript(root, g.id);
+    for (const Game& g : games)
+      if (g.id == "starfall_odyssey") WriteSteamShortcut(root, g.id, g.title);
+  }
   for (Game& g : games) {
     std::stable_sort(g.acts.begin(), g.acts.end(), [](const Act& a, const Act& b) { return a.ago > b.ago; });
     const fs::path save_dir = SavesFor(root, saves, g.id);
@@ -501,6 +571,52 @@ bool WriteDemoLibrary(const fs::path& root, const fs::path& saves, uint64_t now,
     }  // The Library writes last_played as the session ends.
   }
   return true;
+}
+
+void SetDemoLauncher(const fs::path& demo_binary) {
+  std::error_code ec;
+  Launcher() = fs::weakly_canonical(demo_binary, ec);
+  if (ec) Launcher() = demo_binary;
+}
+
+fs::path DemoSteamHome(const fs::path& root) { return fs::absolute(root).parent_path() / "steam-home"; }
+
+bool RunDemoGame(const fs::path& root, const std::string& game_id, const std::vector<DemoStep>& steps,
+                 double step_seconds, double linger, const fs::path& saves, const std::string& profile,
+                 std::string* error) {
+  for (const Game& g : AllGames()) {
+    if (g.id != game_id) continue;
+    std::string who = profile;
+    if (who.empty()) who = g.acts.empty() ? "default" : g.acts.back().profile;
+    System system;
+    system.SetStorage(SavesFor(root, saves, g.id), [who] { return who; });
+    for (const auto& set : g.sets) system.AddSet(set);
+    Library library(system, OptionsFor(g, root));
+    library.Flush();
+    const auto pause = [](double seconds) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000)));
+    };
+    // Started with no steps (from play.sh): unlock the next two achievements,
+    // so an app watching shows it playing.
+    std::vector<DemoStep> todo = steps;
+    if (todo.empty())
+      for (const auto& set : g.sets)
+        for (const auto& a : set.achievements) {
+          const std::string key = a.key.empty() ? set.id + ":" + a.local_id : a.key;
+          if (todo.size() < 2 && !a.secret && a.tier != Tier::kPlatinum && !system.IsUnlocked(key))
+            todo.push_back({"unlock", key, {}});
+        }
+    for (const auto& s : todo) {
+      pause(step_seconds);
+      if (s.kind == "unlock") system.Unlock(s.key);
+      else system.ReportEvent(s.key, s.target);
+      library.Flush();
+    }
+    pause(linger);
+    return library.stats().failures == 0;
+  }
+  if (error) *error = "no demo game '" + game_id + "'";
+  return false;
 }
 
 bool PlayDemoGame(const fs::path& root, const std::string& game_id, const std::vector<DemoStep>& steps,

@@ -42,6 +42,7 @@ changed.
 |---|---|---|---|
 | Move | D-pad, left stick | arrows, Page Up/Down, Home, End | hover |
 | Open a game | A (cross) | Enter | click a card or a recent unlock |
+| Play (Steam or directly, [launching.md](launching.md)) | Y (triangle) | Space | the selected card's Play button |
 | Sort | X (square), LB / RB | Tab, Shift+Tab | click a sort mode |
 | Scroll | right stick | | wheel |
 | Fullscreen | Back / Select | F11 | |
@@ -122,7 +123,8 @@ frame is written as raw RGB24, so a run is the same every time. When the script 
 it is centred in the `--out-size` frame. Commands (`apps/achievements/script.h`):
 
 ```
-wait 1.5              key Down [secs]       pad a [secs]          stick ly 0.8 [secs]
+wait 1.5              realtime 1.5          key Down [secs]       pad a [secs]
+stick ly 0.8 [secs]
 mouse 640 400 [click] wheel -2              size 1280 800         scale 1.25
 labels playstation    exec <shell command>  poll
 ```
@@ -131,8 +133,10 @@ labels playstation    exec <shell command>  poll
 
 ## Privacy
 
-The app only reads: it never writes to the library, a game's files or the player's folder (not even
-the starter preferences file the games create), and it has no network code. Profile ids are shown as
+The app only reads the library: it never writes to it, to a game's files or to the player's folder,
+apart from `launcher.json` there, which remembers how each game was last started
+([launching.md](launching.md)). It doesn't create the starter preferences file the games make, and
+it has no network code. Profile ids are shown as
 the library stores them (hashed when the player turned that on). Accounts and sync will come through
 `SyncProvider` (`sync.h`); nothing uses it yet.
 

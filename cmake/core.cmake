@@ -4,7 +4,8 @@ add_library(recomp_achievements STATIC
     ${CMAKE_CURRENT_LIST_DIR}/../src/config_dir.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../src/library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../src/library_reader.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../src/library_util.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/../src/library_util.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../src/launch.cpp)
 add_library(recomp::achievements ALIAS recomp_achievements)
 target_include_directories(recomp_achievements PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../include
@@ -12,6 +13,10 @@ target_include_directories(recomp_achievements PUBLIC
 # The library writer runs a worker thread.
 find_package(Threads REQUIRED)
 target_link_libraries(recomp_achievements PUBLIC Threads::Threads)
+if(WIN32)
+  # Launching games: the shell (steam:// URLs, the command line) and the registry (Steam's folder).
+  target_link_libraries(recomp_achievements PRIVATE shell32 advapi32)
+endif()
 
 if(RECOMP_ACH_BUILD_TESTS)
   enable_testing()
@@ -40,7 +45,8 @@ if(RECOMP_ACH_BUILD_TESTS)
       ${CMAKE_CURRENT_LIST_DIR}/../tests/core/test_main.cpp
       ${CMAKE_CURRENT_LIST_DIR}/../tests/library/test_library.cpp
       ${CMAKE_CURRENT_LIST_DIR}/../tests/library/test_library_reader.cpp
-      ${CMAKE_CURRENT_LIST_DIR}/../tests/library/test_paths.cpp)
+      ${CMAKE_CURRENT_LIST_DIR}/../tests/library/test_paths.cpp
+      ${CMAKE_CURRENT_LIST_DIR}/../tests/library/test_launch.cpp)
   target_include_directories(recomp_achievements_library_tests PRIVATE
       ${CMAKE_CURRENT_LIST_DIR}/../src ${CMAKE_CURRENT_LIST_DIR}/../tests/core)
   target_link_libraries(recomp_achievements_library_tests PRIVATE recomp::achievements)

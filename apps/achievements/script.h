@@ -6,6 +6,8 @@
 //
 //   # comment
 //   wait 1.5                 let 1.5 s pass
+//   realtime 1.5             the same, at the real clock's pace, for a
+//                            program started from the app to catch up
 //   key Down [0.3]           hold a key (Up Down Left Right Enter Space Escape
 //                            Backspace Tab ShiftTab PageUp PageDown Home End
 //                            F1..F12) for 0.3 s (default 0.12), then let go

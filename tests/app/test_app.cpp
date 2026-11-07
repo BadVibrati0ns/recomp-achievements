@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 
 #include "app.h"
@@ -44,11 +45,19 @@ fs::path DemoLibrary(const char* name) {
 
 struct Rig {
   std::unique_ptr<App> app;
-  explicit Rig(const fs::path& root, int w = 1280, int h = 800) {
+  explicit Rig(const fs::path& root, int w = 1280, int h = 800, const std::function<void(AppOptions&)>& more = {}) {
     AppOptions o;
     o.roots = {root};
     o.global_preferences = false;  // Never read the real player folder.
     o.now = [] { return kNow; };
+    // Never start anything or read the player's Steam or launch choices.
+    o.start = [](const LaunchCommand&, std::string* error) {
+      if (error) *error = "not in tests";
+      return false;
+    };
+    o.shortcuts = [] { return std::vector<SteamShortcut>{}; };
+    o.launcher_prefs = root.parent_path() / "launcher.json";
+    if (more) more(o);
     app = std::make_unique<App>(o);
     app->SetSize(w, h);
     Step();
@@ -272,4 +281,135 @@ TEST(app_relative_time) {
   CHECK_EQ(RelativeTime(kNow - 30 * 3600, kNow), std::string("yesterday"));
   CHECK_EQ(RelativeTime(kNow - 4 * 86400, kNow), std::string("4 days ago"));
   CHECK_EQ(RelativeTime(kNow - 21 * 86400, kNow), std::string("3 weeks ago"));
+}
+
+// ---- Launching ------------------------------------------------------------------
+
+namespace {
+
+void WriteText(const fs::path& path, const std::string& text) {
+  std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+}
+
+void PressY(Rig& r) { r.Tap([](ui::OverlayInput& in) { in.pad_y = true; }); }
+void PressA(Rig& r) { r.Tap([](ui::OverlayInput& in) { in.pad_a = true; }); }
+void PressB(Rig& r) { r.Tap([](ui::OverlayInput& in) { in.pad_b = true; }); }
+void PressDown(Rig& r) { r.Tap([](ui::OverlayInput& in) { in.pad_down = true; }); }
+
+}  // namespace
+
+TEST(app_play_menu_starts_directly_and_remembers) {
+  const fs::path root = DemoLibrary("play_direct");
+  std::vector<LaunchCommand> started;
+  Rig r(root, 1280, 800, [&](AppOptions& o) {
+    o.start = [&](const LaunchCommand& c, std::string*) {
+      started.push_back(c);
+      return true;
+    };
+  });
+  const std::string id = r.S().selected;
+  auto game = LoadLibraryGame(root, id);
+  CHECK(game && !game->launch.empty());  // The demo writer recorded this test binary.
+  PressY(r);
+  CHECK(r.S().launch_menu);
+  CHECK_EQ(r.S().launch_game, id);
+  CHECK_EQ(r.S().launch_choice, std::string("direct"));  // No Steam entry.
+  PressDown(r);  // Steam can't be chosen; the choice stays.
+  r.Tap([](ui::OverlayInput& in) { in.up = true; });
+  CHECK_EQ(r.S().launch_choice, std::string("direct"));
+  PressA(r);
+  CHECK(!r.S().launch_menu);
+  CHECK_EQ(started.size(), size_t(1));
+  if (started.empty()) return;
+  CHECK_EQ(started[0].argv[0], game->launch.exe);
+  CHECK_EQ(r.S().starting, std::vector<std::string>{id});
+  CHECK_EQ(r.S().launched.size(), size_t(1));
+  const LauncherPrefs prefs = LoadLauncherPrefs(root.parent_path() / "launcher.json");
+  CHECK(prefs.methods.count(id) && prefs.methods.at(id) == LaunchMethod::kDirect);
+  // B closes the menu without starting anything.
+  PressY(r);
+  PressB(r);
+  CHECK(!r.S().launch_menu);
+  CHECK_EQ(started.size(), size_t(1));
+}
+
+TEST(app_play_menu_finds_a_steam_shortcut_added_later) {
+  const fs::path root = DemoLibrary("play_steam");
+  const auto first = LoadLibraryGame(root, "neon_drift");
+  CHECK(first && first->launch.steam_game_id.empty());  // Never started by Steam.
+  std::vector<SteamShortcut> shortcuts;
+  std::vector<LaunchCommand> started;
+  Rig r(root, 1280, 800, [&](AppOptions& o) {
+    o.shortcuts = [&] { return shortcuts; };
+    o.start = [&](const LaunchCommand& c, std::string*) {
+      started.push_back(c);
+      return true;
+    };
+  });
+  CHECK_EQ(r.S().selected, std::string("neon_drift"));
+  PressY(r);
+  CHECK_EQ(r.S().launch_choice, std::string("direct"));
+  PressB(r);
+  // Now the player adds it to Steam: the next menu sees it, and Steam comes first.
+  SteamShortcut s;
+  s.appid = 0xA1B2C3D4u;
+  s.name = "Neon Drift";
+  s.exe = "\"" + first->launch.exe + "\"";
+  shortcuts.push_back(s);
+  PressY(r);
+  CHECK_EQ(r.S().launch_choice, std::string("steam"));
+  PressA(r);
+  CHECK_EQ(started.size(), size_t(1));
+  if (started.empty()) return;
+#if !defined(_WIN32)
+  CHECK_EQ(started[0].argv.back(), "steam://rungameid/" + std::to_string(s.game_id()));
+#endif
+  // Direct next time, and that's remembered over the Steam default.
+  PressY(r);
+  PressDown(r);
+  CHECK_EQ(r.S().launch_choice, std::string("direct"));
+  PressA(r);
+  CHECK_EQ(started.size(), size_t(2));
+  if (started.size() < 2) return;
+  CHECK_EQ(started[1].argv[0], first->launch.exe);
+  PressY(r);
+  CHECK_EQ(r.S().launch_choice, std::string("direct"));
+}
+
+TEST(app_play_menu_wont_start_a_second_copy) {
+  const fs::path root = DemoLibrary("play_running");
+  int starts = 0;
+  Rig r(root, 1280, 800, [&](AppOptions& o) {
+    o.start = [&](const LaunchCommand&, std::string*) { return ++starts, true; };
+    o.poll_seconds = 0.05f;
+  });
+  const std::string id = r.S().selected;
+  // This test process plays the game: its marker is in the entry.
+  const auto marker = CurrentRunningMarker();
+  CHECK(marker);
+  if (!marker) return;
+  WriteText(root / id / "running.json", MarkerToJson(*marker).dump());
+  r.Settle(5);
+  CHECK_EQ(r.S().running, std::vector<std::string>{id});
+  PressY(r);
+  CHECK(r.S().launch_menu);
+  PressA(r);  // Close, not Play.
+  CHECK(!r.S().launch_menu);
+  CHECK_EQ(starts, 0);
+  // A marker left by a crash doesn't count.
+  RunningMarker stale = *marker;
+  stale.start += 7;
+  WriteText(root / id / "running.json", MarkerToJson(stale).dump());
+  r.Settle(5);
+  CHECK(r.S().running.empty());
+}
+
+TEST(app_play_menu_shows_why_it_failed) {
+  Rig r(DemoLibrary("play_fail"));
+  PressY(r);
+  PressA(r);  // The rig's start always fails.
+  CHECK(r.S().launch_menu);
+  CHECK_EQ(r.S().launch_error, std::string("not in tests"));
+  CHECK(r.S().launched.empty());
+  CHECK(r.S().starting.empty());
 }

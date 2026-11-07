@@ -20,6 +20,7 @@
 #include <string_view>
 #include <vector>
 
+#include "recomp/achievements/launch.h"
 #include "recomp/achievements/system.h"
 
 namespace recomp::achievements {
@@ -64,6 +65,15 @@ struct LibraryOptions {
   // (through Z:) instead of the one inside the prefix, when it can find it.
   bool wine_host = true;
   LibraryIconSource icon_source;
+  // Record how the game was started (executable, arguments, folder, Steam
+  // id) in game.json, so the library app can start it again (launch.h).
+  bool record_launch = true;
+  // Replaces the executable and arguments recorded, for a game that should be
+  // started through a script or launcher of its own; cwd too when set.
+  LaunchInfo launch;
+  // Keep running.json in the entry while the game runs, so an app doesn't
+  // start a second copy.
+  bool running_marker = true;
   // Progress snapshots are written at most this often; events go out at once.
   std::chrono::milliseconds write_interval{500};
   // How often the worker checks System::generation() for resets, set

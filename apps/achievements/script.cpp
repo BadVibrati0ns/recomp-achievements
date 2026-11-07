@@ -1,10 +1,12 @@
 #include "script.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <sstream>
+#include <thread>
 
 namespace recomp::achievements::app {
 
@@ -97,8 +99,8 @@ bool ParseScript(const std::string& text, std::vector<ScriptCommand>& out, std::
     double v = 0;
     auto num = [&](size_t i) { return i < c.args.size() && Number(c.args[i], v); };
     auto opt_num = [&](size_t i) { return i >= c.args.size() || Number(c.args[i], v); };
-    if (c.op == "wait") {
-      if (c.args.size() != 1 || !num(0) || v < 0) return fail("wait <seconds>");
+    if (c.op == "wait" || c.op == "realtime") {
+      if (c.args.size() != 1 || !num(0) || v < 0) return fail(c.op + " <seconds>");
     } else if (c.op == "key") {
       if (c.args.empty() || !Keys().count(Lower(c.args[0])) || !opt_num(1)) return fail("unknown key or bad time");
     } else if (c.op == "pad") {
@@ -148,6 +150,13 @@ int RunScript(const std::vector<ScriptCommand>& script, float fps, const ScriptT
     if (c.op == "wait") {
       const int n = static_cast<int>(std::lround(arg(0, 0) * fps));
       for (int i = 0; i < n; ++i) frame(nullptr);
+    } else if (c.op == "realtime") {
+      const auto start = std::chrono::steady_clock::now();
+      const int n = static_cast<int>(std::lround(arg(0, 0) * fps));
+      for (int i = 0; i < n; ++i) {
+        std::this_thread::sleep_until(start + std::chrono::microseconds(static_cast<int64_t>(i * 1e6 / fps)));
+        frame(nullptr);
+      }
     } else if (c.op == "key" || c.op == "pad") {
       const Setter set = (c.op == "key" ? Keys() : Pads()).at(Lower(c.args[0]));
       run_for(arg(1, 0.12), set);

@@ -170,6 +170,23 @@ struct App::Impl {
   RectF sort_hits[kSortModes];
   std::vector<std::pair<RectF, std::string>> recent_hits;
 
+  // Launching. The menu offers Steam and starting directly; the choice is
+  // remembered per game.
+  LauncherPrefs prefs;
+  fs::path prefs_file;
+  std::set<std::string> running;
+  std::map<std::string, float> starting;  // Game id -> seconds left showing "Starting".
+  std::vector<std::string> launched;
+  struct Menu {
+    std::string id, title;
+    LaunchPlan plan;
+    int choice = -1;  // 0 Steam, 1 direct, -1 neither can start it.
+    std::string error;
+    RectF rows[2], play, cancel, box;
+  };
+  std::optional<Menu> menu;
+  RectF play_hit;  // The selected card's Play button.
+
   // The game page: the overlay's viewer over a read-only System.
   struct Page {
     std::string id;
@@ -189,6 +206,8 @@ struct App::Impl {
       if (const fs::path dir = GlobalConfigDir(); !dir.empty())
         styles.LoadGlobalStyleFile(dir / "achievements_style.json");
     center.UseStyles(styles);
+    prefs_file = options.launcher_prefs.empty() ? DefaultLauncherPrefsFile() : options.launcher_prefs;
+    if (!prefs_file.empty()) prefs = LoadLauncherPrefs(prefs_file);
   }
 
   uint64_t Now() const { return options.now ? options.now() : static_cast<uint64_t>(std::time(nullptr)); }
@@ -387,6 +406,110 @@ struct App::Impl {
     }
   }
 
+  // ---- Launching ---------------------------------------------------------------
+
+  // Which games run now: each entry's running.json, checked against the process.
+  void RefreshRunning(float dt) {
+    std::set<std::string> now;
+    for (const auto& [id, game] : loaded)
+      if (const auto m = ReadRunningMarker(game.dir); m && MarkerAlive(*m)) now.insert(id);
+    for (auto it = starting.begin(); it != starting.end();) {
+      it->second -= dt;
+      if (it->second <= 0 || now.count(it->first)) {
+        it = starting.erase(it);
+        grid_dirty = true;
+      } else {
+        ++it;
+      }
+    }
+    if (now != running) {
+      running = std::move(now);
+      grid_dirty = true;
+      if (menu) menu->plan.running = running.count(menu->id) > 0;
+    }
+  }
+
+  void OpenMenu(const std::string& id) {
+    const auto it = loaded.find(id);
+    if (it == loaded.end()) return;
+    std::vector<SteamShortcut> shortcuts;
+    if (options.shortcuts) {
+      shortcuts = options.shortcuts();
+    } else {
+      for (const auto& f : FindSteamShortcutFiles(GetEnv("HOME")))
+        for (auto& s : ReadSteamShortcuts(f)) shortcuts.push_back(std::move(s));
+    }
+    Menu m;
+    m.id = id;
+    m.title = it->second.title.empty() ? id : it->second.title;
+    m.plan = PlanLaunch(it->second, shortcuts);
+    m.plan.running = m.plan.running || running.count(id) > 0;
+    const bool can[2] = {!m.plan.steam_game_id.empty(), m.plan.direct};
+    if (const auto p = prefs.methods.find(id); p != prefs.methods.end() && can[p->second == LaunchMethod::kDirect])
+      m.choice = p->second == LaunchMethod::kDirect ? 1 : 0;
+    else
+      m.choice = can[0] ? 0 : can[1] ? 1 : -1;
+    menu = std::move(m);
+    grid_dirty = true;
+    Latch();
+  }
+
+  void CloseMenu() {
+    menu.reset();
+    grid_dirty = true;
+    Latch();
+  }
+
+  bool CanChoose(int i) const { return menu && (i == 0 ? !menu->plan.steam_game_id.empty() : menu->plan.direct); }
+
+  void LaunchChosen() {
+    if (!menu || menu->plan.running || menu->choice < 0) return;
+    const LaunchMethod method = menu->choice == 0 ? LaunchMethod::kSteam : LaunchMethod::kDirect;
+    std::string error;
+    const auto command = BuildLaunch(menu->plan, method, &error);
+    const bool ok = command && (options.start ? options.start(*command, &error) : StartDetached(*command, &error));
+    if (!ok) {
+      menu->error = error.empty() ? "Couldn't start the game." : error;
+      grid_dirty = true;
+      return;
+    }
+    std::string line = command->url;
+    for (const auto& a : command->argv) line += (line.empty() ? "" : " ") + a;
+    launched.push_back(line);
+    prefs.methods[menu->id] = method;
+    if (!prefs_file.empty()) SaveLauncherPrefs(prefs_file, prefs);
+    starting[menu->id] = 30.0f;
+    CloseMenu();
+  }
+
+  void MenuInput(uint32_t pd, uint32_t kd, const OverlayInput& in, bool click) {
+    if ((pd & kPadB) || (kd & kEscape)) return CloseMenu();
+    if ((pd & kPadA) || (kd & kEnter) || (pd & kPadY) || (kd & kSpace)) {
+      if (menu->plan.running) return CloseMenu();
+      return LaunchChosen();
+    }
+    const bool up = (pd & kPadUp) || (kd & kUp), down = (pd & kPadDown) || (kd & kDown);
+    if ((up || down) && !menu->plan.running) {
+      const int next = up ? 0 : 1;
+      if (CanChoose(next) && next != menu->choice) {
+        menu->choice = next;
+        menu->error.clear();
+        grid_dirty = true;
+      }
+    }
+    if (click) {
+      const float mx = in.mouse_x, my = in.mouse_y;
+      if (Inside(menu->play, mx, my)) return menu->plan.running ? CloseMenu() : LaunchChosen();
+      if (Inside(menu->cancel, mx, my) || !Inside(menu->box, mx, my)) return CloseMenu();
+      for (int i = 0; i < 2; ++i)
+        if (Inside(menu->rows[i], mx, my) && CanChoose(i) && !menu->plan.running) {
+          menu->choice = i;
+          menu->error.clear();
+          grid_dirty = true;
+        }
+    }
+  }
+
   // ---- The game page ---------------------------------------------------------------
 
   void OpenGame(const std::string& id) {
@@ -518,6 +641,7 @@ struct App::Impl {
     const uint32_t pd = pad_down & ~latched_pad, kd = keys_down & ~latched_keys;
     if (kd & kF11) fullscreen_request = true;
     if (page) return;  // The viewer has its own input (Frame passes it on).
+    if (menu) return MenuInput(pd, kd, in, click);
     if (pd & kPadBack) fullscreen_request = true;
 
     const Layout l = MakeLayout();
@@ -531,6 +655,10 @@ struct App::Impl {
     }
     if (((pd & kPadA) || (kd & kEnter)) && !games.empty()) {
       OpenGame(games[sel].id);
+      return;
+    }
+    if (((pd & kPadY) || (kd & kSpace)) && !games.empty()) {
+      OpenMenu(games[sel].id);
       return;
     }
 
@@ -565,6 +693,7 @@ struct App::Impl {
     if (in.mouse_present && (moved || click)) {
       const float mx = in.mouse_x, my = in.mouse_y;
       if (click) {
+        if (!games.empty() && Inside(play_hit, mx, my)) return OpenMenu(games[sel].id);
         for (int i = 0; i < kSortModes; ++i)
           if (Inside(sort_hits[i], mx, my)) return SetSort(i);
         for (const auto& [r, id] : recent_hits)
@@ -627,7 +756,9 @@ struct App::Impl {
     const float tx = ir.x1 + 16.0f * s, tw = r.x1 - pad - tx;
     float y = r.y0 + pad - 2.0f * s;
     const float ts = 19.0f * s;
-    for (const auto& line : Canvas::WrapText(*font_bold, ts, g.title, tw, 2)) {
+    // The selected card's Play button sits top right.
+    const float title_w = selected ? tw - TextW(true, 14.0f * s, "Play") - 44.0f * s : tw;
+    for (const auto& line : Canvas::WrapText(*font_bold, ts, g.title, title_w, 2)) {
       Text(true, ts, tx, y, line, th.text);
       y += ts + 3.0f * s;
     }
@@ -635,9 +766,24 @@ struct App::Impl {
     float px = tx;
     px += Pill(px, y + 11.0f * s, s, PlatformName(g.platform), PlatformColor(g.platform), Color::Rgba(255, 255, 255)) +
           6.0f * s;
+    if (running.count(g.id))
+      px += Pill(px, y + 11.0f * s, s, "Running", Color::Rgba(46, 160, 92), Color::Rgba(255, 255, 255)) + 6.0f * s;
+    else if (starting.count(g.id))
+      px += Pill(px, y + 11.0f * s, s, "Starting\xE2\x80\xA6", MixColor(th.panel, th.text, 0.2f), th.text) + 6.0f * s;
     if (g.sets_off)
       Pill(px, y + 11.0f * s, s, std::to_string(g.sets_off) + (g.sets_off == 1 ? " set off" : " sets off"),
            MixColor(th.panel, th.text, 0.12f), th.subtext);
+    if (selected) {
+      // Play, for the mouse; Y or Space does the same.
+      const float bs = 14.0f * s, bh = 28.0f * s;
+      const float bw = TextW(true, bs, "Play") + 34.0f * s;
+      const RectF b{r.x1 - pad - bw, r.y0 + pad - 4.0f * s, r.x1 - pad, r.y0 + pad - 4.0f * s + bh};
+      grid.FillRect(b, th.accent, bh * 0.5f);
+      const float tri = 5.5f * s, cx = b.x0 + 14.0f * s, cy = (b.y0 + b.y1) * 0.5f;
+      grid.FillTriangle({cx - tri * 0.6f, cy - tri}, {cx - tri * 0.6f, cy + tri}, {cx + tri, cy}, OnColor(th.accent));
+      Text(true, bs, cx + 9.0f * s, cy - bs * 0.55f, "Play", OnColor(th.accent));
+      play_hit = b;
+    }
 
     // Bottom up: last played, counts, the bar.
     const float bottom = r.y1 - pad;
@@ -807,10 +953,107 @@ struct App::Impl {
     float x = x0;
     x += hints.Hint(PadGlyph::kDpad, "\xE2\x86\x91\xE2\x86\x93\xE2\x86\x90\xE2\x86\x92", "Move", x, fy) + gap;
     if (!games.empty()) x += hints.Hint(PadGlyph::kA, "Enter", "Open", x, fy) + gap;
+    if (!games.empty()) x += hints.Hint(PadGlyph::kY, "Space", "Play", x, fy) + gap;
     x += hints.Hint(PadGlyph::kX, "Tab", "Sort", x, fy) + gap;
     const float fw = hints.Hint(PadGlyph::kBack, "F11", "Fullscreen", 0, fy, false);
     hints.Hint(PadGlyph::kBack, "F11", "Fullscreen", x1 - fw, fy);
     drawn_minute = Now() / 60;
+    if (menu) DrawMenu(l, th, hints);
+  }
+
+  // The Play menu: a dialog over the dimmed grid.
+  void DrawMenu(const Layout& l, const ViewerTheme& th, const HintPainter& hints) {
+    Menu& m = *menu;
+    const float s = l.s, w = static_cast<float>(width), h = static_cast<float>(height);
+    grid.FillRect({0, 0, w, h}, Color{0, 0, 0, 0.55f});
+    const float bw = std::min(w - 2 * l.margin, 640.0f * s);
+    const float row_h = 74.0f * s, pad = 24.0f * s;
+    const bool running_now = m.plan.running;
+    float bh = pad + 34.0f * s + 14.0f * s;
+    bh += running_now ? 64.0f * s : 2 * row_h + 12.0f * s;
+    if (!m.error.empty()) bh += 34.0f * s;
+    bh += 20.0f * s + 40.0f * s + pad;
+    const RectF box{(w - bw) * 0.5f, (h - bh) * 0.5f, (w + bw) * 0.5f, (h + bh) * 0.5f};
+    m.box = box;
+    grid.FillRect(box, th.panel, 16.0f * s);
+    grid.StrokeRect(box, th.border, 16.0f * s, 1.5f * s);
+    const float x0 = box.x0 + pad, x1 = box.x1 - pad;
+    float y = box.y0 + pad;
+    const float ts = 24.0f * s;
+    Text(true, ts, x0, y, Canvas::EllipsizeText(*font_bold, ts, "Play " + m.title, x1 - x0), th.text);
+    y += 34.0f * s + 14.0f * s;
+
+    m.rows[0] = m.rows[1] = {};
+    if (running_now) {
+      const float ms = 17.0f * s, ds = 14.5f * s;
+      Text(true, ms, x0, y, m.title + " is already running.", th.text);
+      Text(false, ds, x0, y + ms + 10.0f * s,
+           Canvas::EllipsizeText(*font, ds, "Switch to it instead of starting a second copy.", x1 - x0), th.subtext);
+      y += 64.0f * s;
+    } else {
+      std::string steam_note = "No Steam entry found for this game.";
+      if (m.plan.steam_source == "shortcut") steam_note = "Steam shortcut found.";
+      if (m.plan.steam_source == "recorded") steam_note = "Steam started it last time.";
+      if (!m.plan.steam_game_id.empty()) steam_note += " Steam's overlay and controller settings apply.";
+      const char* names[2] = {"Launch through Steam", "Launch directly"};
+      const std::string notes[2] = {steam_note, m.plan.direct ? m.plan.direct_note : m.plan.direct_note.empty()
+                                                                     ? std::string("Can't be started directly.")
+                                                                     : m.plan.direct_note};
+      for (int i = 0; i < 2; ++i) {
+        const RectF r{x0, y, x1, y + row_h};
+        m.rows[i] = r;
+        const bool on = CanChoose(i), cur = m.choice == i;
+        grid.FillRect(r, cur ? th.row_selected : th.row, 10.0f * s);
+        if (cur) grid.StrokeRect(r, WithAlpha(th.accent, 0.85f), 10.0f * s, 2.0f * s);
+        // A radio dot.
+        const float cx = r.x0 + 26.0f * s, cy = (r.y0 + r.y1) * 0.5f, rr = 9.0f * s;
+        grid.StrokeCircle(cx, cy, rr, 2.0f * s, on ? th.text : WithAlpha(th.subtext, 0.5f));
+        if (cur) grid.FillCircle(cx, cy, rr * 0.5f, th.accent);
+        const float tx = cx + rr + 16.0f * s, tw = r.x1 - 14.0f * s - tx;
+        const float ns = 17.5f * s, ds = 13.5f * s;
+        const Color ink = on ? th.text : WithAlpha(th.subtext, 0.6f);
+        Text(true, ns, tx, r.y0 + 15.0f * s, names[i], ink);
+        if (on && prefs.methods.count(m.id) &&
+            (prefs.methods.at(m.id) == LaunchMethod::kDirect) == (i == 1)) {
+          const float lw = TextW(false, ds, "last used");
+          Text(false, ds, r.x1 - 16.0f * s - lw, r.y0 + 17.0f * s, "last used", th.subtext);
+        }
+        Text(false, ds, tx, r.y0 + 15.0f * s + ns + 9.0f * s, Canvas::EllipsizeText(*font, ds, notes[i], tw),
+             on ? th.subtext : WithAlpha(th.subtext, 0.6f));
+        y += row_h + 12.0f * s;
+      }
+    }
+    if (!m.error.empty()) {
+      const float es = 14.5f * s;
+      Text(false, es, x0, y + 4.0f * s, Canvas::EllipsizeText(*font, es, m.error, x1 - x0), Color::Rgba(232, 96, 86));
+      y += 34.0f * s;
+    }
+
+    // Buttons: Play (or Close) on the right, Cancel beside it.
+    const float bs = 16.0f * s, bth = 40.0f * s, by = box.y1 - pad - bth;
+    const bool can_play = !running_now && m.choice >= 0;
+    const std::string main_label = running_now ? "Close" : "Play";
+    const float mw = TextW(true, bs, main_label) + hints.Glyph(PadGlyph::kA, "Enter", 0, 0, false) + 40.0f * s;
+    m.play = {x1 - mw, by, x1, by + bth};
+    grid.FillRect(m.play, can_play || running_now ? th.accent : WithAlpha(th.text, 0.12f), bth * 0.5f);
+    const Color main_ink = can_play || running_now ? OnColor(th.accent) : th.subtext;
+    {
+      HintPainter on = hints;
+      on.text = on.subtext = main_ink;
+      const float gx = m.play.x0 + 16.0f * s;
+      const float gw = on.Glyph(PadGlyph::kA, "Enter", gx, (by + by + bth) * 0.5f);
+      Text(true, bs, gx + gw + 8.0f * s, by + (bth - bs) * 0.5f, main_label, main_ink);
+    }
+    if (!running_now) {
+      const float cw = TextW(true, bs, "Cancel") + hints.Glyph(PadGlyph::kB, "Esc", 0, 0, false) + 40.0f * s;
+      m.cancel = {m.play.x0 - 12.0f * s - cw, by, m.play.x0 - 12.0f * s, by + bth};
+      grid.FillRect(m.cancel, WithAlpha(th.text, 0.10f), bth * 0.5f);
+      const float gx = m.cancel.x0 + 16.0f * s;
+      const float gw = hints.Glyph(PadGlyph::kB, "Esc", gx, (by + by + bth) * 0.5f);
+      Text(true, bs, gx + gw + 8.0f * s, by + (bth - bs) * 0.5f, "Cancel", th.text);
+    } else {
+      m.cancel = {};
+    }
   }
 
   // ---- Popups ---------------------------------------------------------------
@@ -887,8 +1130,10 @@ struct App::Impl {
     RefreshLabels();
     poll_t += dt;
     if (!polled || poll_t >= options.poll_seconds) {
+      const float since = poll_t;
       poll_t = 0;
       Poll();
+      RefreshRunning(since);
     }
     HandleInput(dt, in);
 
@@ -996,6 +1241,15 @@ App::State App::state() const {
       for (const auto& p : it->second.profiles) s.profiles.push_back(p.id);
     s.page = m.page->overlay->view_state();
   }
+  if (m.menu) {
+    s.launch_menu = true;
+    s.launch_game = m.menu->id;
+    s.launch_choice = m.menu->choice == 0 ? "steam" : m.menu->choice == 1 ? "direct" : "";
+    s.launch_error = m.menu->error;
+  }
+  s.running.assign(m.running.begin(), m.running.end());
+  for (const auto& [id, t] : m.starting) s.starting.push_back(id);
+  s.launched = m.launched;
   s.reloads = m.reloads;
   s.popups = m.popup_count;
   return s;

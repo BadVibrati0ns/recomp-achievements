@@ -39,4 +39,19 @@ bool PlayDemoGame(const std::filesystem::path& root, const std::string& game_id,
                   const std::filesystem::path& saves = {}, const std::string& profile = {},
                   std::string* error = nullptr);
 
+// Launching (docs/launching.md). With a launcher set (the demo binary), the
+// library writer also makes <root>/../games/<id>/play.sh for each game, which
+// runs that binary with --run, records it as how the game starts, and writes
+// a Steam shortcut for starfall_odyssey to <root>/../steam-home (a $HOME for
+// FindSteamShortcutFiles), so the app has one game with a Steam entry.
+void SetDemoLauncher(const std::filesystem::path& demo_binary);
+std::filesystem::path DemoSteamHome(const std::filesystem::path& root);
+
+// A demo game running like a real one: running.json while it runs, one step
+// every `step_seconds` (an unlock or an event, at the real clock), then
+// `linger` more seconds before it exits.
+bool RunDemoGame(const std::filesystem::path& root, const std::string& game_id, const std::vector<DemoStep>& steps,
+                 double step_seconds, double linger, const std::filesystem::path& saves = {},
+                 const std::string& profile = {}, std::string* error = nullptr);
+
 }  // namespace recomp::achievements::demo
