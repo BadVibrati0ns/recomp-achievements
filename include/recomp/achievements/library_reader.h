@@ -71,7 +71,14 @@ struct LibrarySet {
 
 struct LibraryGame {
   std::string id;
-  std::filesystem::path dir;  // <root>/<id>
+  // Where the entry's files are: the game's own folder for a game that keeps
+  // its entry there (location.json points to it), else <root>/<id>.
+  std::filesystem::path dir;
+  std::filesystem::path root;  // The library folder that lists it.
+  // location.json points to a folder that isn't there (the game moved, was
+  // deleted, or is on a drive that isn't mounted). dir is that folder; only
+  // id and title are known.
+  bool missing = false;
   int schema = 0;             // 0: no readable game.json.
   std::string title;
   std::vector<Platform> platforms;
@@ -93,6 +100,10 @@ struct LibraryGame {
   // The profile with the most unlocked points (ties: the latest), or null.
   const LibraryProfile* BestProfile() const;
 };
+
+// Where an entry's files are: the folder <entry>/location.json points to,
+// else the entry itself. Sets *missing when the pointer leads nowhere.
+std::filesystem::path ResolveLibraryEntry(const std::filesystem::path& entry, bool* missing = nullptr);
 
 // Every game in a root, by id, with totals and progress but not the sets.
 std::vector<LibraryGame> ListLibrary(const std::filesystem::path& root);

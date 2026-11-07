@@ -812,6 +812,11 @@ void System::SetSettingsPath(fs::path path) {
   ++impl_->generation;
 }
 
+fs::path System::storage_dir() const {
+  std::lock_guard lock(impl_->mutex);
+  return impl_->dir;
+}
+
 fs::path System::settings_path() const {
   std::lock_guard lock(impl_->mutex);
   return impl_->SettingsPath();

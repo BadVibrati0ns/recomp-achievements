@@ -243,7 +243,8 @@ TEST(library_snapshots_are_coalesced) {
 TEST(library_events_append_across_instances) {
   const fs::path tmp = test::TempDir("library_append");
   const fs::path saves = tmp / "saves";
-  const fs::path log = tmp / "library" / "my_game" / "events.log";
+  // The game keeps its entry beside its saves (LibraryMode::kIndex).
+  const fs::path log = saves / "recomp-achievements" / "events.log";
   std::string first_text;
   {
     System sys;
@@ -328,7 +329,7 @@ TEST(library_profile_hashing) {
     CHECK(lib.ProfileId("Player Two") != hashed);
     sys.Unlock("game:a");
   }
-  const fs::path dir = tmp / "library" / "my_game";
+  const fs::path dir = tmp / "saves" / "recomp-achievements";
   CHECK(fs::exists(dir / "progress" / (hashed + ".json")));
   for (const auto& e : fs::recursive_directory_iterator(dir)) {
     if (!e.is_regular_file()) continue;
@@ -340,6 +341,7 @@ TEST(library_profile_hashing) {
   // Stored as given by default; file names stay safe and distinct.
   profile = "Player/One";
   LibraryOptions plain = Options(tmp / "library2");
+  plain.mode = LibraryMode::kCopy;  // Its own entry, in library2.
   {
     Library lib(sys, plain);
     CHECK_EQ(lib.ProfileId("Player/One"), std::string("Player/One"));
@@ -511,4 +513,100 @@ TEST(library_clock_stamps_events_and_last_played) {
   CHECK_EQ(events.size(), size_t(1));
   CHECK_EQ(events[0]["t"].get<uint64_t>(), uint64_t(1700000005000));
   CHECK_EQ(test::ReadJson(root / "my_game" / "game.json")["last_played"].get<uint64_t>(), uint64_t(1700000065));
+}
+
+// ---- Where each game keeps its entry ------------------------------------------------
+
+TEST(library_index_mode_keeps_the_entry_with_the_game) {
+  const fs::path tmp = test::TempDir("library_index");
+  System sys;
+  sys.SetStorage(tmp / "saves");
+  sys.AddSet(MakeSet(tmp / "game_files"));
+  {
+    Library lib(sys, Options(tmp / "library"));
+    CHECK(lib.mode() == LibraryMode::kIndex);
+    CHECK_EQ(lib.dir(), fs::absolute(tmp / "saves" / "recomp-achievements"));
+    CHECK_EQ(lib.game_id(), std::string("my_game"));
+    sys.Unlock("game:a");
+  }
+  // The game's folder has the entry; the library only a pointer to it.
+  CHECK(fs::exists(tmp / "saves" / "recomp-achievements" / "game.json"));
+  CHECK(fs::exists(tmp / "saves" / "recomp-achievements" / "events.log"));
+  std::vector<std::string> in_library;
+  for (const auto& e : fs::directory_iterator(tmp / "library" / "my_game")) in_library.push_back(e.path().filename().string());
+  CHECK_EQ(in_library, std::vector<std::string>{"location.json"});
+  const json loc = test::ReadJson(tmp / "library" / "my_game" / "location.json");
+  CHECK_EQ(fs::path(loc["dir"].get<std::string>()), fs::absolute(tmp / "saves" / "recomp-achievements"));
+
+  // Readers follow it.
+  const auto games = ListLibrary(tmp / "library");
+  CHECK_EQ(games.size(), size_t(1));
+  CHECK(!games[0].missing);
+  CHECK_EQ(games[0].root, tmp / "library");
+  CHECK_EQ(games[0].dir, fs::absolute(tmp / "saves" / "recomp-achievements"));
+  auto g = LoadLibraryGame(tmp / "library", "my_game");
+  CHECK(g && !g->sets.empty());
+  CHECK(g && g->profiles.size() == 1 && g->profiles[0].totals.unlocked == 1);
+  CHECK(g && ReadEvents(*g).size() == 1);
+
+  // The game's folder gone (deleted, or a drive not mounted): listed as missing.
+  fs::rename(tmp / "saves", tmp / "saves-moved");
+  const auto gone = ListLibrary(tmp / "library");
+  CHECK_EQ(gone.size(), size_t(1));
+  CHECK(gone[0].missing);
+  CHECK_EQ(gone[0].title, std::string("My Game"));  // From location.json.
+}
+
+TEST(library_index_mode_moves_an_older_copy_over) {
+  const fs::path tmp = test::TempDir("library_migrate");
+  System sys;
+  sys.SetStorage(tmp / "saves");
+  sys.AddSet(MakeSet(tmp / "game_files"));
+  LibraryOptions copy = Options(tmp / "library");
+  copy.mode = LibraryMode::kCopy;
+  {
+    Library lib(sys, copy);
+    CHECK(lib.mode() == LibraryMode::kCopy);
+    sys.Unlock("game:a");
+  }
+  CHECK(fs::exists(tmp / "library" / "my_game" / "events.log"));
+  {
+    Library lib(sys, Options(tmp / "library"));
+    sys.Unlock("game:b");
+  }
+  // History moved with it: both unlocks in the game's own log.
+  const fs::path dir = tmp / "saves" / "recomp-achievements";
+  CHECK_EQ(EventLines(dir / "events.log").size(), size_t(2));
+  CHECK(!fs::exists(tmp / "library" / "my_game" / "events.log"));
+  CHECK(!fs::exists(tmp / "library" / "my_game" / "game.json"));
+  CHECK(fs::exists(tmp / "library" / "my_game" / "location.json"));
+  // Back to copying: the pointer goes, the entry is written in the library.
+  {
+    Library lib(sys, copy);
+    lib.Flush();
+  }
+  CHECK(!fs::exists(tmp / "library" / "my_game" / "location.json"));
+  CHECK(fs::exists(tmp / "library" / "my_game" / "game.json"));
+}
+
+TEST(library_index_mode_needs_a_folder) {
+  const fs::path tmp = test::TempDir("library_no_storage");
+  System sys;  // No SetStorage: nowhere beside the game to write.
+  sys.AddSet(MakeSet(tmp / "game_files"));
+  {
+    Library lib(sys, Options(tmp / "library"));
+    CHECK(lib.mode() == LibraryMode::kCopy);
+    lib.Flush();
+  }
+  CHECK(fs::exists(tmp / "library" / "my_game" / "game.json"));
+  // An explicit folder works without storage.
+  LibraryOptions o = Options(tmp / "library2");
+  o.data_dir = tmp / "elsewhere";
+  {
+    Library lib(sys, o);
+    CHECK(lib.mode() == LibraryMode::kIndex);
+    lib.Flush();
+  }
+  CHECK(fs::exists(tmp / "elsewhere" / "game.json"));
+  CHECK(fs::exists(tmp / "library2" / "my_game" / "location.json"));
 }

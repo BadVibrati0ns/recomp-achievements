@@ -1,8 +1,9 @@
 # The achievement library
 
-Every game that uses this SDK can keep an entry in one shared folder: its achievement sets as it
-resolved them, their icons, each profile's progress and a log of what happened. A desktop app can then
-show every recomp's achievements in one place (a grid of games, totals, recent unlocks, each game's
+Every game that uses this SDK can keep an entry: its achievement sets as it resolved them, their
+icons, each profile's progress and a log of what happened. By default the entry stays in the game's own
+folder, beside its saves, and one shared library folder only records where each game keeps it
+([below](#where-each-game-keeps-its-entry)). A desktop app can then show every recomp's achievements in one place (a grid of games, totals, recent unlocks, each game's
 list) without ever reading a game's own files: no XEX, XDBF, `TROPHY.TRP` or save layouts. The
 library is local; its event log is shaped so an accounts/sync service can be added later.
 
@@ -43,7 +44,9 @@ can keep it off until they say yes.
 
 | `LibraryOptions` | Default | Meaning |
 |---|---|---|
-| `game_id` | `""` | The entry's folder. Characters other than `A-Z a-z 0-9 . _ -` become `_`. Empty: off. |
+| `game_id` | `""` | The game's name in the library. Characters other than `A-Z a-z 0-9 . _ -` become `_`. Empty: off. |
+| `mode` | `kIndex` | `kIndex`: the entry is in the game's folder and the library points to it. `kCopy`: the entry is written into the library folder ([below](#where-each-game-keeps-its-entry)). |
+| `data_dir` | `<storage dir>/recomp-achievements` | `kIndex`: the entry's folder. Empty uses the `System`'s storage folder, so call `SetStorage` first; with neither, the game falls back to `kCopy`. |
 | `title` | first set's title | Display name. |
 | `version` | `""` | The game's version or build. |
 | `icon`, `icon_base_dir` | the platform's title image | A file or icon ref. Empty tries `xdbf:32768` (Xbox 360) or `trophy:ICON0.PNG` (PS3) through the icon source. |
@@ -59,7 +62,8 @@ can keep it off until they say yes.
 
 ## Where it is
 
-`DefaultLibraryRoot()` is `library/` inside the player's folder for every game (`GlobalConfigDir()`,
+The library folder (the pointers, `install.json`, and `kCopy` entries) is `DefaultLibraryRoot()`:
+`library/` inside the player's folder for every game (`GlobalConfigDir()`,
 `config_dir.h`, the same folder as the global popup style):
 
 | | |
@@ -69,7 +73,64 @@ can keep it off until they say yes.
 | Override | `$RECOMP_ACHIEVEMENTS_CONFIG_DIR/library` |
 | Windows build under Wine/Proton | the Linux host's `~/.config/recomp-achievements/library` through `Z:` ([below](#wine-and-proton)) |
 
+## Where each game keeps its entry
+
+**`kIndex` (the default).** Everything a game writes about the player stays beside the game. The entry
+is written to `data_dir`, by default `recomp-achievements/` inside the folder the game passed to
+`System::SetStorage`, next to its saves and `achievement_settings.json`. The library folder only gets
+a pointer:
+
+```
+library/
+├── install.json
+└── my_game/
+    └── location.json
+saves/                                the game's storage folder
+├── default_achievements.json         the game's own saves, as before
+├── achievement_settings.json
+└── recomp-achievements/              the entry (layout below)
+    ├── game.json
+    ├── sets/  icons/  progress/
+    ├── events.log
+    └── running.json                  while the game runs
+```
+
+```json
+{
+  "schema": "recomp-achievements-location/1",
+  "game_id": "my_game",
+  "title": "My Game",
+  "dir": "/home/deck/Games/my_game/saves/recomp-achievements",
+  "updated": 1793992905
+}
+```
+
+- **Host path:** `dir` is the path as the host sees it. A Windows build under Wine or Proton writes the
+  Linux path (through `wine_get_unix_file_name`), so the app on the host can follow it.
+- **Following it:** readers follow the pointer with `ResolveLibraryEntry()`. `ListLibrary` and
+  `LoadLibraryGame` do it for you, and `LibraryGame::dir` is the game's folder.
+- **Missing folder:** when that folder isn't there (the game was moved or deleted, or it is on a drive
+  that isn't mounted), the game is still listed, with `missing = true` and the title from
+  `location.json`. The app marks it **Folder not found**. When the game runs again, it writes the
+  pointer again.
+- **Not the save files:** the entry is still the library's own format, not the game's save files. Icons
+  from an XEX, XDBF or `TROPHY.TRP`, and progress worked out from triggers, are exported as PNGs and
+  JSON, so an app never needs the game's data files.
+
+**`kCopy`.** The entry is written into `library/<game id>/`, as earlier versions did. Use it for a game
+that can't keep files beside itself, such as one installed read-only. A game with no storage folder and
+no `data_dir` uses it automatically.
+
+**Switching.**
+- **Older copy:** a `kIndex` game that finds an entry an older version copied into the library moves it
+  into its own folder (game.json, sets, icons, progress and every events log), so its history isn't
+  split. Then it writes `location.json`.
+- **Back to `kCopy`:** switching back to `kCopy` removes `location.json`, and the entry is written in
+  the library again.
+
 ## Layout
+
+The entry's files, wherever the entry is:
 
 ```
 library/
@@ -223,7 +284,8 @@ of events is one append.
 
 ## Privacy
 
-The library is in the player's own config folder and never leaves the machine. What it holds:
+The entries are in each game's own folder (or, with `kCopy`, the player's config folder), and nothing
+leaves the machine. What they hold:
 
 - **Profile ids are the game's profile names** (gamertags, PSN-style names, whatever the game passes
   to `SetStorage`), stored as given. With `hash_profiles` (or `"hash_profiles": true` in
@@ -234,8 +296,8 @@ The library is in the player's own config folder and never leaves the machine. W
 - Secret achievements and their text are stored in full; the app should hide them until unlocked.
 - Paths: icon refs are rewritten and the icon index is hashed. `game.json`'s `launch` records the
   game's executable, its arguments and its folder, so the app can start it again. Games that don't
-  want that set `record_launch = false` ([launching.md](launching.md)). Nothing records where the
-  saves are.
+  want that set `record_launch = false` ([launching.md](launching.md)). With `kIndex`,
+  `location.json` in the library records where the game's entry is, which is beside its saves.
 - `install_id` is random and made once per library folder; delete `install.json` to get a new one.
 
 ## Wine and Proton

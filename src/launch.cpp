@@ -370,6 +370,19 @@ LaunchInfo CurrentLaunchInfo() {
   return info;
 }
 
+std::string HostPath(const fs::path& path) {
+  std::error_code ec;
+  fs::path abs = fs::absolute(path, ec);
+  if (ec) abs = path;
+#if defined(_WIN32)
+  if (RunningUnderWine())
+    if (std::string unix_path = WineUnixPath(abs.wstring()); !unix_path.empty()) return unix_path;
+  return Utf8(abs.wstring().c_str());
+#else
+  return abs.lexically_normal().string();
+#endif
+}
+
 // ---- Running marker ----------------------------------------------------------
 
 json MarkerToJson(const RunningMarker& m) {

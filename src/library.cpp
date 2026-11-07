@@ -69,6 +69,8 @@ struct Library::Impl {
   bool wine = false;
   bool hash_profiles = false;
   fs::path root, dir;
+  fs::path pointer_dir;  // <root>/<game id>: the entry (kCopy) or its location.json (kIndex).
+  LibraryMode mode = LibraryMode::kCopy;
   std::string game_id, install_id;
 
   uint64_t NowMs() const { return options.clock ? options.clock() : detail::UnixMillis(); }
@@ -136,7 +138,19 @@ struct Library::Impl {
     wine = RunningUnderWine();
     root = options.root.empty() ? DefaultLibraryRoot(options.wine_host) : options.root;
     if (root.empty()) return;
-    dir = root / game_id;
+    pointer_dir = root / game_id;
+    dir = pointer_dir;
+    if (options.mode == LibraryMode::kIndex) {
+      fs::path data = options.data_dir;
+      if (data.empty())
+        if (const fs::path storage = system.storage_dir(); !storage.empty()) data = storage / "recomp-achievements";
+      if (!data.empty()) {
+        mode = LibraryMode::kIndex;
+        std::error_code ec;
+        dir = fs::absolute(data, ec);
+        if (ec) dir = data;
+      }
+    }
     hash_profiles = options.hash_profiles;
     LoadInstall();
     LoadIconIndex();
@@ -304,8 +318,47 @@ struct Library::Impl {
     marker.reset();
   }
 
+  // kIndex: moves an entry an older version copied into the library folder
+  // over to the game's folder (when that has none yet), then points the
+  // library at it. kCopy: drops a pointer a kIndex run left.
+  void PlaceEntry() {
+    std::error_code ec;
+    const fs::path location = pointer_dir / "location.json";
+    if (mode == LibraryMode::kCopy) {
+      fs::remove(location, ec);
+      return;
+    }
+    if (fs::is_regular_file(pointer_dir / "game.json", ec) && !fs::exists(dir / "game.json", ec)) {
+      fs::create_directories(dir, ec);
+      for (const auto& e : fs::directory_iterator(pointer_dir, ec)) {
+        const std::string name = e.path().filename().string();
+        const bool ours = name == "game.json" || name == "sets" || name == "icons" || name == "progress" ||
+                          (name.rfind("events", 0) == 0 && e.path().extension() == ".log");
+        if (!ours) continue;
+        std::error_code move_ec;
+        fs::rename(e.path(), dir / name, move_ec);
+        if (move_ec) {
+          // Another drive: copy, then remove the old one only if that worked.
+          std::error_code copy_ec;
+          fs::copy(e.path(), dir / name, fs::copy_options::recursive | fs::copy_options::overwrite_existing, copy_ec);
+          if (!copy_ec) fs::remove_all(e.path(), copy_ec);
+        }
+      }
+    }
+    const ojson doc = {{"schema", "recomp-achievements-location/1"},
+                       {"game_id", game_id},
+                       {"title", !options.title.empty() ? options.title : game_id},
+                       {"dir", HostPath(dir)},
+                       {"updated", UnixSeconds()}};
+    fs::create_directories(pointer_dir, ec);
+    Write(location, doc);
+  }
+
   void WorkLocked(bool force) {
-    if (!launch_recorded) RecordLaunch();
+    if (!launch_recorded) {
+      PlaceEntry();
+      RecordLaunch();
+    }
     std::vector<LibraryEvent> events;
     {
       std::lock_guard lock(shared->mutex);
@@ -706,6 +759,9 @@ void Library::Flush() {
 
 bool Library::enabled() const { return impl_->active; }
 fs::path Library::dir() const { return impl_->active ? impl_->dir : fs::path(); }
+fs::path Library::root() const { return impl_->active ? impl_->root : fs::path(); }
+std::string Library::game_id() const { return impl_->game_id; }
+LibraryMode Library::mode() const { return impl_->mode; }
 std::string Library::install_id() const { return impl_->install_id; }
 std::string Library::ProfileId(std::string_view profile) const { return impl_->ProfileId(profile); }
 

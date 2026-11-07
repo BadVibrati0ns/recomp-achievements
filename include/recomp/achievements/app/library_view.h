@@ -33,6 +33,7 @@ struct GameSummary {
   TierCount tiers[5];  // By Tier; [0] unused.
   bool trophies = false;  // Any achievement has a tier.
   size_t sets_on = 0, sets_off = 0;
+  bool missing = false;  // Its folder isn't there (LibraryGame::missing).
 
   float fraction() const { return count ? static_cast<float>(unlocked) / count : 0.0f; }
   bool complete() const { return count > 0 && unlocked == count; }

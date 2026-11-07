@@ -19,9 +19,10 @@ list of its own.
 - **An achievement without an icon** (most custom ones) uses the game's desktop icon, in the popup and
   in the achievement list. If the game doesn't supply one, a trophy is drawn instead.
 - **Saves:** progress is saved for each profile, and older save keys still load.
-- **One library for every game:** each game keeps a copy of its sets, icons and progress, plus an
-  append-only event log, in a shared folder next to the player's preferences, so a desktop app can
-  show every recomp's achievements without reading any game's files. A Windows build under Proton
+- **One library for every game:** each game keeps its sets, icons and progress, plus an append-only
+  event log, in its own folder beside its saves, and a shared library folder next to the player's
+  preferences records where each game is. A desktop app can then show every recomp's achievements
+  without reading any game's data files. Copying the entry into the shared folder is an option. A Windows build under Proton
   writes to the Linux host's folder. See [docs/library.md](docs/library.md).
 - **Launching games:** the app starts any game in the library through Steam or directly, and
   remembers the choice for each game. It finds a Steam shortcut added after the game first ran, and

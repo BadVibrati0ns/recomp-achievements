@@ -290,7 +290,7 @@ struct App::Impl {
     std::map<std::string, LibraryGame> next;
     bool page_sets_changed = false, page_changed = false;
     for (const LibraryGame& listed : ListLibrary(roots)) {
-      const fs::path root = listed.dir.parent_path();
+      const fs::path root = listed.root;
       const std::string key = root.string() + "|" + listed.id;
       const auto it = loaded.find(listed.id);
       const auto old_stamp = before.find(key);
@@ -793,7 +793,10 @@ struct App::Impl {
     float px = tx;
     px += Pill(px, y + 11.0f * s, s, PlatformName(g.platform), PlatformColor(g.platform), Color::Rgba(255, 255, 255)) +
           6.0f * s;
-    if (g.id == options.current_game)
+    if (g.missing)
+      px += Pill(px, y + 11.0f * s, s, "Folder not found", Color::Rgba(180, 70, 60), Color::Rgba(255, 255, 255)) +
+            6.0f * s;
+    else if (g.id == options.current_game)
       px += Pill(px, y + 11.0f * s, s, "Playing", th.accent, OnColor(th.accent)) + 6.0f * s;
     else if (running.count(g.id))
       px += Pill(px, y + 11.0f * s, s, "Running", Color::Rgba(46, 160, 92), Color::Rgba(255, 255, 255)) + 6.0f * s;
@@ -816,6 +819,16 @@ struct App::Impl {
 
     // Bottom up: last played, counts, the bar.
     const float bottom = r.y1 - pad;
+    if (g.missing) {
+      // Nothing to count: say why instead.
+      const float ms = 13.5f * s;
+      float my = bottom - 2 * (ms + 4.0f * s);
+      for (const auto& line : Canvas::WrapText(*font, ms, "Its folder was moved, deleted or is on a drive that isn't connected.", tw, 2)) {
+        Text(false, ms, tx, my, line, WithAlpha(th.subtext, 0.85f));
+        my += ms + 4.0f * s;
+      }
+      return;
+    }
     const float ls = 13.5f * s, cs = 14.5f * s;
     std::string played = "Played " + RelativeTime(g.last_played, Now());
     if (!g.last_played) played = "Not played yet";

@@ -935,7 +935,7 @@ struct Overlay::Impl {
       app::AppOptions o;
       o.roots = options.library_roots;
       o.global_preferences = options.global_preferences;
-      o.current_game = library->dir().filename().string();
+      o.current_game = library->game_id();
       o.on_back = [this] { browser_back = true; };
       if (options.on_quit_request) o.quit_current = [this] { quit_requested = true; };
       o.start = options.start_game;
@@ -952,6 +952,10 @@ struct Overlay::Impl {
     browser->HoldInput(held);
     browser_open = true;
     open = true;
+    // The page is opaque and has no fade: opened straight from a game's menu
+    // (the viewer closed), the viewer counts as fully open behind it, so
+    // visible() is true and closing the page lands on the viewer.
+    open_t = 1.0f;
   }
 
   void CloseBrowser() {
@@ -2464,7 +2468,9 @@ const Image& Overlay::image() const {
 }
 
 PixelRect Overlay::dirty_rect() const { return impl_->last_dirty; }
-bool Overlay::visible() const { return impl_->open_t > 0.0f || !impl_->popup_sigs.empty(); }
+bool Overlay::visible() const {
+  return impl_->open_t > 0.0f || !impl_->popup_sigs.empty() || (impl_->browser_open && impl_->browser_shown);
+}
 
 void Overlay::Open() { impl_->SetOpen(true); }
 void Overlay::OpenSettings() {

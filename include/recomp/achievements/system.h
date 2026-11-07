@@ -102,6 +102,7 @@ class System {
   // asked for the profile before each unlock, so switching profiles in game
   // reloads that profile's progress. With no storage, progress is in memory.
   void SetStorage(std::filesystem::path dir, ProfileProvider profile = nullptr);
+  std::filesystem::path storage_dir() const;  // Empty: no storage.
   void ReloadProgress();
   // Replaces the active profile's progress in memory (by achievement key) and
   // makes `profile` active, without saving or calling listeners. For

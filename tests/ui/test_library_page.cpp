@@ -192,6 +192,22 @@ TEST(library_page_no_quit_box_without_a_handler) {
   CHECK(!r.Page().quit_box);
 }
 
+TEST(library_page_opened_from_a_closed_viewer_is_visible) {
+  Rig r(Fresh("page_from_closed"));
+  CHECK(!r.overlay->is_open());
+  CHECK(r.overlay->OpenLibraryPage());
+  CHECK(r.Step());  // Drawn on the first frame.
+  CHECK(r.overlay->visible());  // Hosts that blend only while visible() show it.
+  CHECK(r.V().library_page);
+  // Back lands on the viewer, then B closes it and it fades out.
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  CHECK(r.overlay->is_open());
+  CHECK(r.overlay->visible());
+  r.Tap([](OverlayInput& in) { in.pad_b = true; });
+  for (int i = 0; i < 30; ++i) r.Step();
+  CHECK(!r.overlay->visible());
+}
+
 TEST(library_page_needs_the_library) {
   System system;
   system.AddSet(OneSet("mine", "This Game"));

@@ -18,7 +18,8 @@ GameSummary Summarize(const LibraryGame& game, const std::string& profile_id) {
   GameSummary g;
   g.id = game.id;
   g.title = game.title.empty() ? game.id : game.title;
-  g.root = game.dir.parent_path();
+  g.root = game.root;
+  g.missing = game.missing;
   g.icon = game.icon;
   g.last_played = game.last_played;
   g.profiles = game.profiles.size();
@@ -152,11 +153,14 @@ std::map<std::string, EntryStamp> StampLibrary(const std::vector<fs::path>& root
     for (const auto& e : fs::directory_iterator(root, ec)) {
       const std::string id = e.path().filename().string();
       if (id.empty() || id[0] == '.' || !e.is_directory(ec)) continue;
+      // A game that keeps its entry in its own folder is stamped there.
+      const fs::path dir = ResolveLibraryEntry(e.path());
       EntryStamp s;
-      s.sets = StampFile(s.sets, e.path() / "game.json");
-      s.sets = StampDir(s.sets, e.path() / "sets");
-      s.sets = StampFile(s.sets, e.path() / "icons" / "index.json");
-      s.progress = StampDir(s.progress, e.path() / "progress");
+      s.sets = StampFile(s.sets, e.path() / "location.json");
+      s.sets = StampFile(s.sets, dir / "game.json");
+      s.sets = StampDir(s.sets, dir / "sets");
+      s.sets = StampFile(s.sets, dir / "icons" / "index.json");
+      s.progress = StampDir(s.progress, dir / "progress");
       out[root.string() + "|" + id] = s;
     }
   }

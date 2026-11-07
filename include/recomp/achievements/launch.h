@@ -69,6 +69,11 @@ std::optional<RunningMarker> CurrentRunningMarker();
 // one counts). False for another OS or boot.
 bool MarkerAlive(const RunningMarker& marker);
 
+// A path as the host sees it: under Wine, the Linux path (through Wine's
+// wine_get_unix_file_name); elsewhere the absolute path. For paths a game
+// records for an app on the host to read.
+std::string HostPath(const std::filesystem::path& path);
+
 // ---- Steam --------------------------------------------------------------------
 
 struct SteamShortcut {

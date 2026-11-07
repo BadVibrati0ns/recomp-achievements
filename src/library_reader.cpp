@@ -129,10 +129,19 @@ bool LoadSet(const LibraryGame& game, const fs::path& path, LibrarySet& out, std
   return true;
 }
 
-LibraryGame ReadGame(const fs::path& dir, const std::string& id, bool with_sets) {
+LibraryGame ReadGame(const fs::path& entry, const std::string& id, bool with_sets) {
   LibraryGame g;
   g.id = id;
+  g.root = entry.parent_path();
+  const fs::path dir = ResolveLibraryEntry(entry, &g.missing);
   g.dir = dir;
+  if (g.missing) {
+    const json loc = detail::ReadJsonFile(entry / "location.json");
+    g.title = loc.is_object() ? Str(loc, "title") : std::string();
+    if (g.title.empty()) g.title = id;
+    g.warnings.push_back("its folder isn't there: " + PathText(dir));
+    return g;
+  }
   std::error_code ec;
   const json doc = detail::ReadJsonFile(dir / "game.json");
   if (doc.is_object()) {
@@ -209,6 +218,11 @@ bool LooksLikeEntry(const fs::path& dir) {
   std::error_code ec;
   return fs::is_regular_file(dir / "game.json", ec) || fs::is_directory(dir / "sets", ec) ||
          fs::is_directory(dir / "progress", ec);
+}
+
+bool HasLocation(const fs::path& entry) {
+  std::error_code ec;
+  return fs::is_regular_file(entry / "location.json", ec);
 }
 
 bool SafeId(const std::string& id) {
@@ -303,13 +317,27 @@ const LibraryProfile* LibraryGame::BestProfile() const {
   return best;
 }
 
+fs::path ResolveLibraryEntry(const fs::path& entry, bool* missing) {
+  if (missing) *missing = false;
+  const json loc = detail::ReadJsonFile(entry / "location.json");
+  const std::string dir = loc.is_object() ? Str(loc, "dir") : std::string();
+  if (dir.empty()) return entry;
+  std::error_code ec;
+  const fs::path target(dir);
+  if (!fs::is_directory(target, ec) || !LooksLikeEntry(target)) {
+    if (missing) *missing = true;
+  }
+  return target;
+}
+
 std::vector<LibraryGame> ListLibrary(const fs::path& root) {
   std::vector<LibraryGame> out;
   std::error_code ec;
   try {
     for (const auto& e : fs::directory_iterator(root, ec)) {
       const std::string id = PathText(e.path().filename());
-      if (id.empty() || id[0] == '.' || !e.is_directory(ec) || !LooksLikeEntry(e.path())) continue;
+      if (id.empty() || id[0] == '.' || !e.is_directory(ec) || !(LooksLikeEntry(e.path()) || HasLocation(e.path())))
+        continue;
       out.push_back(ReadGame(e.path(), id, false));
     }
   } catch (...) {

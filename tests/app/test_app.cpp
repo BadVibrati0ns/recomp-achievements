@@ -388,7 +388,7 @@ TEST(app_play_menu_wont_start_a_second_copy) {
   const auto marker = CurrentRunningMarker();
   CHECK(marker);
   if (!marker) return;
-  WriteText(root / id / "running.json", MarkerToJson(*marker).dump());
+  WriteText(ResolveLibraryEntry(root / id) / "running.json", MarkerToJson(*marker).dump());
   r.Settle(5);
   CHECK_EQ(r.S().running, std::vector<std::string>{id});
   PressY(r);
@@ -399,7 +399,7 @@ TEST(app_play_menu_wont_start_a_second_copy) {
   // A marker left by a crash doesn't count.
   RunningMarker stale = *marker;
   stale.start += 7;
-  WriteText(root / id / "running.json", MarkerToJson(stale).dump());
+  WriteText(ResolveLibraryEntry(root / id) / "running.json", MarkerToJson(stale).dump());
   r.Settle(5);
   CHECK(r.S().running.empty());
 }

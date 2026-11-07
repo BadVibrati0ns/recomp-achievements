@@ -44,10 +44,26 @@ struct LibraryIcon {
 using LibraryIconSource = std::function<bool(std::string_view ref, std::string_view set_id,
                                              const std::filesystem::path& base_dir, LibraryIcon& out)>;
 
+// Where a game's entry lives (docs/library.md#where-each-game-keeps-its-entry).
+enum class LibraryMode {
+  // The entry (game.json, sets, icons, progress, events) is in the game's
+  // own folder, beside its saves; the library folder only holds a pointer
+  // to it (<root>/<game id>/location.json). The default.
+  kIndex,
+  // The entry is written into the library folder itself (<root>/<game id>),
+  // for games that can't keep files beside themselves.
+  kCopy,
+};
+
 struct LibraryOptions {
   // The game's folder name in the library, e.g. "my_game". Keep it stable
   // across versions. Empty: no library.
   std::string game_id;
+  LibraryMode mode = LibraryMode::kIndex;
+  // kIndex: the entry's folder. Empty: <System storage dir>/recomp-achievements
+  // (call SetStorage before creating the Library); with no storage either,
+  // the entry is copied into the library folder as with kCopy.
+  std::filesystem::path data_dir;
   // Display title; empty uses the first set's title, else game_id.
   std::string title;
   std::string version;  // The game's version or build, recorded with every event.
@@ -101,8 +117,14 @@ class Library {
   void Flush();
 
   bool enabled() const;
-  // <root>/<game id>; empty when disabled.
+  // Where the entry is written: the game's own folder (kIndex), or
+  // <root>/<game id> (kCopy, or no storage). Empty when disabled.
   std::filesystem::path dir() const;
+  // The library folder and this game's id in it.
+  std::filesystem::path root() const;
+  std::string game_id() const;
+  // The mode in use: kCopy when kIndex had no folder to use.
+  LibraryMode mode() const;
   std::string install_id() const;
   // The id progress and events use for a profile (hashed or file-safe).
   std::string ProfileId(std::string_view profile) const;
