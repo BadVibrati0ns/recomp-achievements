@@ -570,10 +570,30 @@ struct Overlay::Impl {
     return t;
   }
 
+  // The list's scale, and in *wanted the scale before a short window capped it.
+  float ListScale(const Style& st, float* wanted = nullptr) const {
+    // Below ~0.75 the text gets too small to read at 720p; the player's List
+    // size moves that floor with it, so a smaller list is always smaller.
+    const float list = std::clamp(appearance.list_size, 0.5f, 2.0f);
+    const float s = std::max(0.75f * list, BaseScale() * st.viewer.scale);
+    if (wanted) *wanted = s;
+    // Growing stops where the panel can't show two rows: its chrome is about
+    // 262 * s tall, a row about 100 * s, and the margins max(16, 36 * s).
+    const float h = static_cast<float>(height);
+    const float fit = std::min((h - 32.0f) / 462.0f, h / 534.0f);
+    return std::min(s, std::max(fit, 0.75f * std::min(list, 1.0f)));
+  }
+
+  // List size can't grow the list any further in this window.
+  bool ListSizeCapped() const {
+    float wanted = 0;
+    const float s = ListScale(*ChromeStyle(), &wanted);
+    return appearance.list_size > 1.0f && wanted > s + 0.001f;
+  }
+
   Metrics MakeMetrics(const Style& st) const {
     Metrics m;
-    // Below ~0.75 the text gets too small to read at 720p.
-    m.s = std::max(0.75f, BaseScale() * st.viewer.scale);
+    m.s = ListScale(st);
     const float s = m.s;
     const float margin = std::max(16.0f, 36.0f * s);
     const float pw = std::min(static_cast<float>(width) - 2 * margin, 1120.0f * s);
@@ -868,7 +888,9 @@ struct Overlay::Impl {
            appearance.theme.empty() ? "The look this game picked for its popups and this list."
                                     : "The look of the popups and this list.");
       item(SettingRow::kPopupSize, std::string(kRowPopupSize), "Popup size", "How big unlock and progress popups are.");
-      item(SettingRow::kListSize, std::string(kRowListSize), "List size", "How big this list and its text are.");
+      item(SettingRow::kListSize, std::string(kRowListSize), "List size",
+           ListSizeCapped() ? "Limited by the window's size."
+                            : "How big this list and its text are.");
     }
     if (options.settings_sets && !all_sets.empty()) {
       const size_t on = sets.size();
@@ -2024,19 +2046,61 @@ struct Overlay::Impl {
     gear_hit = {};
     host_hit = {};
     float button_x = hx0 + TextW(true, m.title, title) + 18.0f * s;
+
+    // The totals on the right. In a narrow window they drop " unlocked", then
+    // the Settings label, then the points, before running into the buttons.
+    const std::string count = std::to_string(totals.unlocked) + " / " + std::to_string(totals.count);
+    const float cs = 22.0f * s, ls = 15.0f * s;
+    std::string pts;
+    if (totals.points) {
+      const AchievementSet* ts = TabSet();
+      // "All" says G too when every set counted is an Xbox 360 one.
+      const bool all_tab = tab_ids.empty() || tab_ids[tab].empty();
+      const bool xbox = all_tab ? !sets.empty() && std::all_of(sets.begin(), sets.end(), [](const AchievementSet* x) {
+        return x->platform == Platform::kXbox360;
+      })
+                                : ts && ts->platform == Platform::kXbox360;
+      pts = std::to_string(totals.unlocked_points) + " / " + std::to_string(totals.points) + (xbox ? "G" : " pts");
+    }
+    const float settings_gr = 9.0f * s, settings_ts = 15.0f * s;
+    const float gear_w = 12.0f * s + settings_gr * 2 + 12.0f * s;
+    const float label_w = 8.0f * s + TextW(true, settings_ts, "Settings") + 2.0f * s;
+    float host_w = 0;
+    std::string host_text;
+    if (host_fn && !host_label.empty()) {
+      host_text = Canvas::EllipsizeText(*font_bold, 15.0f * s, host_label, 260.0f * s);
+      host_w = 12.0f * s + 16.0f * s + 8.0f * s + TextW(true, 15.0f * s, host_text) + 14.0f * s + 10.0f * s;
+    }
+    bool show_unlocked = true, show_label = true, show_pts = !pts.empty();
+    auto totals_w = [&] {
+      float w = TextW(true, cs, count);
+      if (show_unlocked) w += TextW(false, ls, " unlocked");
+      if (show_pts) w += 28.0f * s + TextW(true, cs, pts);
+      return w;
+    };
+    auto fits = [&] {
+      float x = button_x + host_w;
+      if (SettingsAvailable()) x += gear_w + (show_label ? label_w : 0) + 10.0f * s;
+      return x + 4.0f * s + totals_w() <= hx1;
+    };
+    if (!fits()) show_unlocked = false;
+    if (!fits()) show_label = false;
+    if (!fits()) show_pts = false;
+
     if (SettingsAvailable()) {
       // A settings button beside the title, for the mouse; lit while open.
-      const float bh = 32.0f * s, ts = 15.0f * s, gr = 9.0f * s;
+      const float bh = 32.0f * s, ts = settings_ts, gr = settings_gr;
       const char* label = "Settings";
       const float bx = button_x;
-      const float bw = 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s;
+      const float bw = show_label ? 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s : gear_w;
       const float by = hy + (m.title - bh) * 0.5f + 2.0f * s;
       const RectF b{bx, by, bx + bw, by + bh};
       const Color fill = settings_screen ? th.accent : MixColor(th.panel, th.text, 0.09f);
       const Color ink = settings_screen ? OnColor(th.accent) : th.subtext;
       canvas.FillRect(b, WithAlpha(fill, ease), bh * 0.5f);
       DrawGear(bx + 12.0f * s + gr, by + bh * 0.5f, gr, WithAlpha(ink, ease), WithAlpha(fill, ease));
-      DrawText(true, ts, bx + 12.0f * s + gr * 2 + 8.0f * s, by + (bh - ts) * 0.5f, label, WithAlpha(ink, ease));
+      if (show_label)
+        DrawText(true, ts, bx + 12.0f * s + gr * 2 + 8.0f * s, by + (bh - ts) * 0.5f, label, WithAlpha(ink, ease));
       gear_hit = b;
       button_x = b.x1 + 10.0f * s;
     }
@@ -2044,7 +2108,7 @@ struct Overlay::Impl {
       // The host's button: a person glyph and its label, like Settings.
       const float bh = 32.0f * s, ts = 15.0f * s, gr = 8.0f * s;
       const float bx = button_x;
-      const std::string label = Canvas::EllipsizeText(*font_bold, ts, host_label, 260.0f * s);
+      const std::string& label = host_text;
       const float bw = 12.0f * s + gr * 2 + 8.0f * s + TextW(true, ts, label) + 14.0f * s;
       const float by = hy + (m.title - bh) * 0.5f + 2.0f * s;
       const RectF b{bx, by, bx + bw, by + bh};
@@ -2059,27 +2123,16 @@ struct Overlay::Impl {
       host_hit = b;
     }
     {
-      const std::string count = std::to_string(totals.unlocked) + " / " + std::to_string(totals.count);
-      const float cs = 22.0f * s, ls = 15.0f * s;
-      std::string pts;
-      if (totals.points) {
-        const AchievementSet* ts = TabSet();
-        // "All" says G too when every set counted is an Xbox 360 one.
-        const bool all_tab = tab_ids.empty() || tab_ids[tab].empty();
-        const bool xbox = all_tab ? !sets.empty() && std::all_of(sets.begin(), sets.end(), [](const AchievementSet* x) {
-          return x->platform == Platform::kXbox360;
-        })
-                                  : ts && ts->platform == Platform::kXbox360;
-        pts = std::to_string(totals.unlocked_points) + " / " + std::to_string(totals.points) + (xbox ? "G" : " pts");
-      }
       float x = hx1;
-      if (!pts.empty()) {
+      if (show_pts) {
         x -= TextW(true, cs, pts);
         DrawText(true, cs, x, hy + 2.0f * s, pts, WithAlpha(th.text, ease));
         x -= 28.0f * s;
       }
-      x -= TextW(false, ls, " unlocked");
-      DrawText(false, ls, x, hy + 2.0f * s + (cs - ls) * 0.7f, " unlocked", WithAlpha(th.subtext, ease));
+      if (show_unlocked) {
+        x -= TextW(false, ls, " unlocked");
+        DrawText(false, ls, x, hy + 2.0f * s + (cs - ls) * 0.7f, " unlocked", WithAlpha(th.subtext, ease));
+      }
       x -= TextW(true, cs, count);
       DrawText(true, cs, x, hy + 2.0f * s, count, WithAlpha(th.text, ease));
       const float frac = totals.count ? static_cast<float>(totals.unlocked) / totals.count : 0.0f;
@@ -2094,7 +2147,9 @@ struct Overlay::Impl {
       DrawText(true, ts, hx0, mm.tabs_y + (m.tab_h - ts) * 0.5f, "Settings", WithAlpha(th.text, ease));
       const float ss = 15.5f * s;
       DrawText(false, ss, hx0, mm.filter_y + (m.filter_h - ss) * 0.5f,
-               "Saved for this game, for every profile. Sets that are off keep their progress.",
+               Canvas::EllipsizeText(*font, ss,
+                                     "Saved for this game, for every profile. Sets that are off keep their progress.",
+                                     hx1 - hx0),
                WithAlpha(th.subtext, ease));
     } else {
       const float ty = mm.tabs_y, th_ = m.tab_h, ts = 17.0f * s;
@@ -2640,6 +2695,7 @@ Overlay::ViewState Overlay::view_state() const {
   v.setting_selected = m.setting_sel_id;
   v.hold = m.hold_id.empty() ? 0.0f : m.HoldFraction(m.hold_id);
   v.host_button = m.host_fn ? m.host_label : std::string();
+  v.list_scale = m.model_scale;
   return v;
 }
 

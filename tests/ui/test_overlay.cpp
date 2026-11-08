@@ -700,6 +700,32 @@ TEST(overlay_settings_theme_and_sizes) {
   CHECK_EQ(r.V().setting_selected, std::string("list_size"));  // Still on the row after the relayout.
 }
 
+TEST(overlay_list_size_in_a_small_window) {
+  // A short window (a game's 549 x 311, say) sits at the smallest readable
+  // scale: List size still shrinks the list, and can't grow it past the room.
+  Rig r(OverlayOptions{}, 549, 311);
+  r.overlay->Open();
+  r.Settle();
+  const float base = r.V().list_scale;
+  CHECK_NEAR(base, 0.75f, 1e-4);
+  auto set_list = [&](float size) {
+    AppearanceSettings look;
+    look.list_size = size;
+    SetAppearanceSettings(r.system, look);
+    r.Settle(2);
+  };
+  set_list(0.75f);
+  CHECK_NEAR(r.V().list_scale, base * 0.75f, 1e-4);
+  set_list(1.5f);
+  CHECK_NEAR(r.V().list_scale, base, 1e-4);  // No room for a bigger list.
+  // A tall window has room: the same setting grows it there.
+  r.overlay->SetSize(1920, 1080);
+  r.Settle(2);
+  const float tall = r.V().list_scale;
+  set_list(1.0f);
+  CHECK_NEAR(tall, r.V().list_scale * 1.5f, 1e-4);
+}
+
 TEST(overlay_settings_appearance_set_by_the_game) {
   // A game that offers these in its own menu writes the same setting; the
   // overlay picks it up on its next frame.

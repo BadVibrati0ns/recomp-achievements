@@ -246,6 +246,7 @@ class Overlay {
     float hold = 0.0f;  // 0..1 while a reset is being held.
     std::string host_button;  // SetHostButton's label; empty when none.
     bool library_page = false;  // The All games page is showing.
+    float list_scale = 0.0f;    // The list's scale, after List size and the window's room.
   };
   ViewState view_state() const;
 

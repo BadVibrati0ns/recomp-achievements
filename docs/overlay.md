@@ -208,6 +208,9 @@ game passes nothing but its storage folder. Four sections, each a list of rows:
   size** and **List size**, each from 75% to 150%. Left / right change the selected one and stop at the ends
   of the sizes; A (or a click) steps forward and goes round. The overlay applies them to its styles at once
   ([styling.md](styling.md#the-players-theme-and-sizes)), so the next popup and the list itself use them.
+  The list never goes below a readable size on its own, but List size under 100% always shrinks it. A window
+  too short for a bigger list (under about 460 lines at 100%) caps it, and the row says it's limited by the
+  window's size.
 - **Achievement sets**: one row per set, with its unlock count and points, and a switch (A, or left for off
   and right for on). Sets that are off stay listed here; they leave the set tabs, "All" and the header
   totals, can't unlock (so no popups come from them), and keep their progress for when they're back on.

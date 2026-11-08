@@ -61,7 +61,8 @@ overlay and `PopupUi` call themselves when the setting changes):
   theme, it keeps only the global and user layers' tweaks.
 - `popup_size` multiplies the resolved `scale` (the popups); `list_size`
   multiplies `viewer.scale` (the overlay's list, or the font scale of the ImGui
-  list). The offered sizes are 75%, 85%, 100%, 115%, 130% and 150%.
+  list). The offered sizes are 75%, 85%, 100%, 115%, 130% and 150%. The overlay's
+  list keeps room for two rows, so a short window caps how far it grows.
 
 `ui::GetAppearanceSettings()` / `SetAppearanceSettings()` read and write it, for
 a game that offers these in its own menu.
