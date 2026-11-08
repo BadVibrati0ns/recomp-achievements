@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <map>
@@ -599,7 +600,9 @@ struct Library::Impl {
         missing = true;
         return {};
       }
-      stamp = std::to_string(size) + ":" + std::to_string(time.time_since_epoch().count());
+      // intmax_t: libc++ on Windows counts file times in __int128, which
+      // std::to_string has no overload for.
+      stamp = std::to_string(size) + ":" + std::to_string(static_cast<std::intmax_t>(time.time_since_epoch().count()));
     } else {
       key = std::string(set_id) + "|" + ref;
       stamp = "version:" + options.version;
