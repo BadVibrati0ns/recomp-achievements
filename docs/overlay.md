@@ -197,13 +197,17 @@ options.on_quit_request = [] { RequestSaveAndQuit(); };  // The game's own clean
 
 Start (Options on PlayStation), F2 or the Settings button beside the title opens the settings; B goes back
 to the list. Everything is saved through the `System` ([settings file](json-format.md#settings-file)), so a
-game passes nothing but its storage folder. Three sections, each a list of rows:
+game passes nothing but its storage folder. Four sections, each a list of rows:
 
 - **Popup sound**: a switch, and the volume in 10% steps with left / right (or a click on the track). Each
   change plays the progress sound at the new level. The overlay applies both to every popup: nothing reaches
   `play_sound` / `sound_handler` while sound is off, and the volume they get already includes the player's.
   Games that play popup sounds another way read `ui::GetPopupSoundSettings(system)` (`sounds.h`) or
   multiply with `ui::PopupSoundGain()`.
+- **Appearance**: the **Theme** (the game's choice, by platform, or one of the built-in themes), **Popup
+  size** and **List size**, each from 75% to 150%. Left / right change the selected one and stop at the ends
+  of the sizes; A (or a click) steps forward and goes round. The overlay applies them to its styles at once
+  ([styling.md](styling.md#the-players-theme-and-sizes)), so the next popup and the list itself use them.
 - **Achievement sets**: one row per set, with its unlock count and points, and a switch (A, or left for off
   and right for on). Sets that are off stay listed here; they leave the set tabs, "All" and the header
   totals, can't unlock (so no popups come from them), and keep their progress for when they're back on.
@@ -213,14 +217,14 @@ game passes nothing but its storage folder. Three sections, each a list of rows:
   fills the row; letting go or moving away cancels it, a single press never resets anything, and the button
   has to be released before another reset can start.
 
-Footer hints follow the selected row (Turn on / Turn off, Volume, Choose, Hold to reset) and the device in
+Footer hints follow the selected row (Turn on / Turn off, Volume, Theme, Size, Choose, Hold to reset) and the device in
 use, with Xbox or PlayStation labels as elsewhere. LB and RB do nothing on the settings page, so the first
 half of the Start + LB chord can't change a setting on the way out.
 
 `show_settings = false` hides the page (and its button and hints). A game that already offers some of these
-in its own menus hides just those sections with `settings_sound`, `settings_sets` or `settings_reset`, and
-can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()` and
-`ui::SetPopupSoundSettings()`.
+in its own menus hides just those sections with `settings_appearance`, `settings_sound`, `settings_sets` or
+`settings_reset`, and can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()`,
+`ui::SetPopupSoundSettings()` and `ui::SetAppearanceSettings()`.
 
 ## Options
 
@@ -239,7 +243,7 @@ can drive the same state through `System::SetSetEnabled()`, `System::ResetSet()`
 | `popups_over_viewer` | true | See above. |
 | `allow_reveal_secrets`, `show_credits` | true, true | |
 | `show_settings` | true | The settings page. |
-| `settings_sound`, `settings_sets`, `settings_reset` | true, true, true | Its sections. |
+| `settings_appearance`, `settings_sound`, `settings_sets`, `settings_reset` | true, true, true, true | Its sections. |
 | `reset_hold_seconds` | 1.2 | How long a reset is held. |
 | `show_disabled_sets` | false | Sets that are off get tabs too, marked Off and dimmed, still out of the totals. For apps showing another game's data. |
 | `title` | `"Achievements"` | Panel title. |

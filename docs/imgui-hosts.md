@@ -62,7 +62,7 @@ stopgap. Players who want handheld popups larger set `"small_screen_scale": 1.3`
 
 ## 4. The rest is shared
 
-Styles, sounds, the player's global preferences, the settings (sound, sets, resets) and the
+Styles, sounds, the player's global preferences, the settings (theme and sizes, sound, sets, resets) and the
 [library](library.md) are the same objects in both kinds of host. `PopupUiOptions::library.game_id` turns
 the library on, the same as `OverlayOptions::library`.
 

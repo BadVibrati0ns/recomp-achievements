@@ -110,14 +110,15 @@ AppOptions MakeOptions(const Args& a) {
 
 // A made-up game with three achievements and a plain backdrop, writing its own
 // library entry ("overlay_demo") and showing the in-game viewer over itself,
-// as a game using ui::Overlay does. Asked to quit, it says so on screen.
+// as a game using ui::Overlay does. Asked to quit, it says so on screen. F9
+// shows a test popup, to see the popups' style and size.
 struct InGame {
   System system;
   ui::Overlay overlay;
   ui::Canvas backdrop;
   std::shared_ptr<ui::Font> font = ui::Font::Builtin(true);
   ui::Image out;
-  bool quit = false, drawn_quit = false;
+  bool quit = false, drawn_quit = false, f9_held = false;
 
   static AchievementSet Set() {
     AchievementSet s;
@@ -185,6 +186,8 @@ struct InGame {
   }
 
   bool Frame(float dt, const ui::OverlayInput& in) {
+    if (in.f[9] && !f9_held) system.TestPopup();
+    f9_held = in.f[9];
     const bool changed = overlay.Frame(dt, in);
     const bool quit_changed = quit != drawn_quit;
     if (quit_changed) DrawBackdrop();

@@ -26,6 +26,7 @@ struct ListOptions {
   // The "Settings" button and view. Hide it, or the sections a game already
   // offers in its own menus.
   bool show_settings = true;
+  bool settings_appearance = true;  // Theme, popup size and list size.
   bool settings_sound = true;  // Popup sound on/off and volume.
   bool settings_sets = true;   // Turning each set on and off.
   bool settings_reset = true;  // Resetting chosen achievements, a set, or everything.
@@ -69,6 +70,9 @@ class AchievementListWindow {
   bool settings_open_ = false;
   bool reset_mode_ = false;
   float volume_edit_ = -1.0f;  // While the slider is dragged; saved on release.
+  // The player's list size (AppearanceSettings), re-read when settings change.
+  float list_size_ = 1.0f;
+  uint64_t list_size_generation_ = 0;
   // The reset waiting for confirmation.
   struct PendingReset {
     std::string label;

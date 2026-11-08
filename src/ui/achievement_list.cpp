@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <ctime>
 #include <map>
 #include <vector>
@@ -72,7 +73,14 @@ AchievementListWindow::AchievementListWindow(System& system, IconCache* icons) :
 
 void AchievementListWindow::Draw(bool* open) {
   ImGui::SetNextWindowSize(ImVec2(640, 560), ImGuiCond_FirstUseEver);
-  if (ImGui::Begin(options_.window_title, open)) DrawContents();
+  if (ImGui::Begin(options_.window_title, open)) {
+    if (const uint64_t gen = system_.generation(); gen != list_size_generation_) {
+      list_size_generation_ = gen;
+      list_size_ = GetAppearanceSettings(system_).list_size;
+    }
+    ImGui::SetWindowFontScale(list_size_);
+    DrawContents();
+  }
   ImGui::End();
 }
 
@@ -119,6 +127,32 @@ void AchievementListWindow::DrawResetConfirmation() {
 }
 
 void AchievementListWindow::DrawSettingsBody() {
+  if (options_.settings_appearance) {
+    ImGui::SeparatorText("Appearance");
+    AppearanceSettings look = GetAppearanceSettings(system_);
+    bool changed = false;
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::BeginCombo("Theme", AppearanceThemeName(look.theme).c_str())) {
+      for (const std::string& t : AppearanceThemes()) {
+        if (ImGui::Selectable(AppearanceThemeName(t).c_str(), t == look.theme)) look.theme = t, changed = true;
+      }
+      ImGui::EndCombo();
+    }
+    auto size = [&](const char* label, float& value) {
+      auto pct = [](float v) { return std::to_string(static_cast<int>(v * 100.0f + 0.5f)) + "%"; };
+      ImGui::SetNextItemWidth(220);
+      if (ImGui::BeginCombo(label, pct(value).c_str())) {
+        for (const float v : AppearanceSizes()) {
+          if (ImGui::Selectable(pct(v).c_str(), std::abs(v - value) < 0.01f)) value = v, changed = true;
+        }
+        ImGui::EndCombo();
+      }
+    };
+    size("Popup size", look.popup_size);
+    size("List size", look.list_size);
+    if (changed) SetAppearanceSettings(system_, look);
+  }
+
   if (options_.settings_sound) {
     ImGui::SeparatorText("Popup sound");
     PopupSoundSettings sound = GetPopupSoundSettings(system_);

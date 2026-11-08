@@ -171,6 +171,9 @@ const Color kDanger = Color::Rgba(222, 76, 66);
 // Ids of the settings rows (see Overlay::ViewState::setting_rows).
 constexpr std::string_view kRowSound = "sound";
 constexpr std::string_view kRowVolume = "volume";
+constexpr std::string_view kRowTheme = "theme";
+constexpr std::string_view kRowPopupSize = "popup_size";
+constexpr std::string_view kRowListSize = "list_size";
 constexpr std::string_view kRowResetPick = "reset:pick";
 constexpr std::string_view kRowResetAll = "reset:all";
 
@@ -376,6 +379,7 @@ struct Overlay::Impl {
   bool model_stale = true;
   uint64_t model_generation = 0, model_serial = 0, model_style_generation = 0;
   float model_scale = 0, model_width = 0;
+  float settings_scale = 0;  // model_scale when the settings page last kept its selection in view.
   std::vector<const AchievementSet*> sets;    // Turned on.
   std::vector<const AchievementSet*> listed;  // In the tabs: sets, or all with show_disabled_sets.
   std::vector<bool> tab_off;                  // Per tab: a set that's off.
@@ -389,7 +393,7 @@ struct Overlay::Impl {
 
   // The settings page: headings and rows, in list space like entries.
   struct SettingRow {
-    enum Kind { kHeading, kSound, kVolume, kSet, kResetPick, kResetSet, kResetAll } kind = kHeading;
+    enum Kind { kHeading, kTheme, kPopupSize, kListSize, kSound, kVolume, kSet, kResetPick, kResetSet, kResetAll } kind = kHeading;
     std::string id, set_id;
     std::string title, detail, aside;  // aside: a heading's right-hand note.
     bool on = false;
@@ -402,6 +406,8 @@ struct Overlay::Impl {
   std::string setting_sel_id;
   float settings_h = 0;
   PopupSoundSettings sound;
+  AppearanceSettings appearance;
+  uint64_t appearance_generation = 0;
   // Hold to confirm (resets): what is held, for how long, and the last one
   // that went through (shown until the selection moves).
   std::string hold_id;
@@ -535,7 +541,8 @@ struct Overlay::Impl {
   }
 
   bool SettingsAvailable() const {
-    return options.show_settings && (options.settings_sound || options.settings_sets || options.settings_reset);
+    return options.show_settings &&
+           (options.settings_appearance || options.settings_sound || options.settings_sets || options.settings_reset);
   }
 
   // Start / F2 press the host button when there's no settings page to open.
@@ -605,6 +612,7 @@ struct Overlay::Impl {
     listed = options.show_disabled_sets ? all_sets : sets;
     auto is_on = [&](const AchievementSet* set) { return std::find(sets.begin(), sets.end(), set) != sets.end(); };
     sound = GetPopupSoundSettings(system);
+    appearance = GetAppearanceSettings(system);
     // Keep the tab on the same set across rebuilds.
     const std::string cur_tab = tab < tab_ids.size() ? tab_ids[tab] : std::string();
     tab_ids.clear();
@@ -854,6 +862,14 @@ struct Overlay::Impl {
       item(SettingRow::kVolume, std::string(kRowVolume), "Volume",
            sound.enabled ? "How loud popup sounds play." : "Sound is off.");
     }
+    if (options.settings_appearance) {
+      heading("Appearance");
+      item(SettingRow::kTheme, std::string(kRowTheme), "Theme",
+           appearance.theme.empty() ? "The look this game picked for its popups and this list."
+                                    : "The look of the popups and this list.");
+      item(SettingRow::kPopupSize, std::string(kRowPopupSize), "Popup size", "How big unlock and progress popups are.");
+      item(SettingRow::kListSize, std::string(kRowListSize), "List size", "How big this list and its text are.");
+    }
     if (options.settings_sets && !all_sets.empty()) {
       const size_t on = sets.size();
       heading("Achievement sets", std::to_string(on) + " of " + std::to_string(all_sets.size()) + " on");
@@ -906,10 +922,15 @@ struct Overlay::Impl {
     if (model_stale || model_generation != system.generation() || model_serial != data_serial.load() ||
         model_style_generation != styles->generation()) {
       BuildModel();
-      return;
+    } else {
+      const Metrics m = MakeMetrics(*ChromeStyle());
+      if (model_scale != m.s || model_width != m.list.width()) BuildModel();
     }
-    const Metrics m = MakeMetrics(*ChromeStyle());
-    if (model_scale != m.s || model_width != m.list.width()) BuildModel();
+    // A new size (List size, say) moves every settings row: keep the selected one in view.
+    if (settings_screen && settings_scale != model_scale) {
+      settings_scale = model_scale;
+      SelectSetting(setting_sel, MakeMetrics(*ChromeStyle()), true);
+    }
   }
 
   // ---- Bindings ----------------------------------------------------------------
@@ -1108,6 +1129,21 @@ struct Overlay::Impl {
     PlayPreview();
   }
 
+  void SetAppearance(const AppearanceSettings& next) {
+    if (next == appearance) return;
+    SetAppearanceSettings(system, next);
+    appearance = next;
+    ApplyAppearance();
+  }
+
+  // The player's theme and sizes onto the styles, when the settings changed.
+  void ApplyAppearance() {
+    const uint64_t gen = system.generation();
+    if (gen == appearance_generation) return;
+    appearance_generation = gen;
+    styles->SetPlayerAppearance(GetAppearanceSettings(system));
+  }
+
   void SetSoundOn(bool on) {
     PopupSoundSettings next = sound;
     next.enabled = on;
@@ -1140,6 +1176,9 @@ struct Overlay::Impl {
   bool ActivateSetting(const SettingRow& r, const Metrics& m) {
     switch (r.kind) {
       case SettingRow::kSound: SetSoundOn(!sound.enabled); return true;
+      case SettingRow::kTheme:
+      case SettingRow::kPopupSize:
+      case SettingRow::kListSize: StepAppearance(r.kind, 1, true); return true;
       case SettingRow::kSet: system.SetSetEnabled(r.set_id, !r.on); return true;
       case SettingRow::kResetPick:
         settings_screen = false;
@@ -1162,11 +1201,37 @@ struct Overlay::Impl {
     switch (r.kind) {
       case SettingRow::kVolume: SetVolume(sound.volume + 0.1f * dir); break;
       case SettingRow::kSound: SetSoundOn(dir > 0); break;
+      case SettingRow::kTheme:
+      case SettingRow::kPopupSize:
+      case SettingRow::kListSize: StepAppearance(r.kind, dir, false); break;
       case SettingRow::kSet:
         if (r.on != (dir > 0)) system.SetSetEnabled(r.set_id, dir > 0);
         break;
       default: break;
     }
+  }
+
+  // One step of a theme or size row. A (wrap) goes round from the last
+  // choice to the first; left / right stop at the ends of the sizes.
+  void StepAppearance(SettingRow::Kind kind, int dir, bool wrap) {
+    AppearanceSettings next = appearance;
+    const auto& sizes = AppearanceSizes();
+    auto step = [&](float& size) {
+      const float stepped = StepAppearanceSize(size, dir);
+      size = wrap && stepped == size ? (dir > 0 ? sizes.front() : sizes.back()) : stepped;
+    };
+    if (kind == SettingRow::kTheme) next.theme = StepAppearanceTheme(appearance.theme, dir);
+    else if (kind == SettingRow::kPopupSize) step(next.popup_size);
+    else if (kind == SettingRow::kListSize) step(next.list_size);
+    SetAppearance(next);
+  }
+
+  // What a theme or size row shows on its right.
+  std::string AppearanceValue(SettingRow::Kind kind) const {
+    auto pct = [](float v) { return std::to_string(static_cast<int>(std::lround(v * 100))) + "%"; };
+    if (kind == SettingRow::kTheme) return AppearanceThemeName(appearance.theme);
+    if (kind == SettingRow::kPopupSize) return pct(appearance.popup_size);
+    return pct(appearance.list_size);
   }
 
   void ConfirmReset(const SettingRow& r) {
@@ -1893,6 +1958,22 @@ struct Overlay::Impl {
         }
         break;
       }
+      case SettingRow::kTheme:
+      case SettingRow::kPopupSize:
+      case SettingRow::kListSize: {
+        // The choice, with arrows either side when selected: left / right change it.
+        const std::string v = AppearanceValue(row.kind);
+        const float ps = 18.0f * s, k = 5.0f * s;
+        const float vw = TextW(true, ps, v), ax1 = rx - k, vx = ax1 - 14.0f * s - vw, ax0 = vx - 14.0f * s;
+        DrawText(true, ps, vx, cy - ps * 0.5f, v, WithAlpha(th.text, alpha));
+        if (sel) {
+          canvas.Line(ax0 + k * 0.5f, cy - k, ax0 - k * 0.5f, cy, 2.0f * s, WithAlpha(th.subtext, alpha));
+          canvas.Line(ax0 - k * 0.5f, cy, ax0 + k * 0.5f, cy + k, 2.0f * s, WithAlpha(th.subtext, alpha));
+          canvas.Line(ax1 - k * 0.5f, cy - k, ax1 + k * 0.5f, cy, 2.0f * s, WithAlpha(th.subtext, alpha));
+          canvas.Line(ax1 + k * 0.5f, cy, ax1 - k * 0.5f, cy + k, 2.0f * s, WithAlpha(th.subtext, alpha));
+        }
+        break;
+      }
       case SettingRow::kResetPick: {
         // A chevron: opens the list.
         const float k = 7.0f * s;
@@ -2206,6 +2287,9 @@ struct Overlay::Impl {
             x += DrawHint(Action::kDetails, r->on ? "Turn off" : "Turn on", x, fy, s, th, ease) + gap;
             break;
           case SettingRow::kVolume: x += DrawHint(Action::kAdjust, "Volume", x, fy, s, th, ease) + gap; break;
+          case SettingRow::kTheme: x += DrawHint(Action::kAdjust, "Theme", x, fy, s, th, ease) + gap; break;
+          case SettingRow::kPopupSize:
+          case SettingRow::kListSize: x += DrawHint(Action::kAdjust, "Size", x, fy, s, th, ease) + gap; break;
           case SettingRow::kResetPick: x += DrawHint(Action::kDetails, "Choose", x, fy, s, th, ease) + gap; break;
           case SettingRow::kResetSet:
           case SettingRow::kResetAll: x += DrawHint(Action::kDetails, "Hold to reset", x, fy, s, th, ease) + gap; break;
@@ -2340,6 +2424,7 @@ struct Overlay::Impl {
     ++stats.frames;
     clock += dt;
     if (width <= 0 || height <= 0 || !font || !font_bold) return false;
+    ApplyAppearance();
     RefreshBindings();
     if (browser_open) {
       bool changed = false;

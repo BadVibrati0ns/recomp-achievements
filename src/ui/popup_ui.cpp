@@ -56,7 +56,15 @@ bool PopupUi::ReloadStyles(std::string* error) {
   return ok;
 }
 
+void PopupUi::ApplyAppearance() {
+  const uint64_t gen = system_.generation();
+  if (gen == appearance_generation_) return;
+  appearance_generation_ = gen;
+  styles_.SetPlayerAppearance(GetAppearanceSettings(system_));
+}
+
 bool PopupUi::HandleInput(float dt, const OverlayInput& input) {
+  ApplyAppearance();
   // The player's "viewer" keys, re-read when the styles change.
   if (styles_.generation() != bindings_generation_) {
     bindings_generation_ = styles_.generation();
@@ -82,6 +90,7 @@ void PopupUi::SetListOpen(bool open) {
 }
 
 void PopupUi::Draw() {
+  ApplyAppearance();
   renderer_.Draw();
   if (!list_open_) return;
   bool open = true;
@@ -90,6 +99,7 @@ void PopupUi::Draw() {
 }
 
 void PopupUi::Draw(bool* list_open) {
+  ApplyAppearance();
   renderer_.Draw();
   if (list_open && *list_open) list_.Draw(list_open);
 }

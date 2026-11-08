@@ -575,8 +575,8 @@ TEST(overlay_settings_page_navigation) {
   r.Tap([](OverlayInput& in) { in.pad_start = true; });
   auto v = r.V();
   CHECK(v.settings);
-  CHECK_EQ(v.setting_rows, (std::vector<std::string>{"sound", "volume", "set:x", "set:c", "reset:pick", "reset:set:x",
-                                                     "reset:set:c", "reset:all"}));
+  CHECK_EQ(v.setting_rows, (std::vector<std::string>{"sound", "volume", "theme", "popup_size", "list_size", "set:x",
+                                                     "set:c", "reset:pick", "reset:set:x", "reset:set:c", "reset:all"}));
   CHECK_EQ(v.setting_selected, std::string("sound"));
   r.Tap([](OverlayInput& in) { in.pad_down = true; });
   CHECK_EQ(r.V().setting_selected, std::string("volume"));
@@ -645,6 +645,77 @@ TEST(overlay_settings_toggle_set) {
   CHECK_EQ(r.V().tabs, (std::vector<std::string>{"", "x", "c"}));
   r.Tap([](OverlayInput& in) { in.pad_b = true; });
   CHECK_EQ(r.V().keys.size(), 11u);
+}
+
+TEST(overlay_settings_theme_and_sizes) {
+  Rig r;
+  r.overlay->Open();
+  r.Settle();
+  const std::string game_theme = r.overlay->styles().Resolve(nullptr)->theme;
+  const float game_scale = r.overlay->styles().Resolve(nullptr)->scale;
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  for (int i = 0; i < 2; ++i) r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("theme"));
+  // Right steps from the game's choice to "by platform", then the built-ins.
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string("auto"));
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string("xbox360"));
+  r.Step();
+  CHECK_EQ(r.overlay->styles().Resolve(nullptr)->theme, std::string("xbox360"));
+  CHECK(r.V().settings);  // Left / right adjust here instead of switching tabs.
+  // Left past the start wraps round to the last theme; A steps forward.
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string(""));
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string("classic"));
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string(""));
+  r.Step();
+  CHECK_EQ(r.overlay->styles().Resolve(nullptr)->theme, game_theme);
+
+  // Popup size: one step up multiplies the popups' scale, and is saved.
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("popup_size"));
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_size, 1.15f, 1e-6);
+  CHECK_NEAR(r.system.GetSetting("appearance")["popup_size"].get<double>(), 1.15, 1e-9);
+  r.Step();
+  CHECK_NEAR(r.overlay->styles().Resolve(nullptr)->scale, game_scale * 1.15f, 1e-5);
+  // The ends stop left / right; A wraps from the largest to the smallest.
+  for (int i = 0; i < 6; ++i) r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_size, 1.5f, 1e-6);
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_size, 0.75f, 1e-6);
+
+  // List size grows the viewer itself.
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("list_size"));
+  const float before = r.overlay->styles().Resolve(nullptr)->viewer.scale;
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  r.Step();
+  CHECK_NEAR(r.overlay->styles().Resolve(nullptr)->viewer.scale, before * 1.15f, 1e-5);
+  CHECK(r.V().settings);
+  CHECK_EQ(r.V().setting_selected, std::string("list_size"));  // Still on the row after the relayout.
+}
+
+TEST(overlay_settings_appearance_set_by_the_game) {
+  // A game that offers these in its own menu writes the same setting; the
+  // overlay picks it up on its next frame.
+  OverlayOptions opt;
+  opt.settings_appearance = false;
+  Rig r(opt);
+  AppearanceSettings look;
+  look.theme = "ps3";
+  look.list_size = 1.3f;
+  SetAppearanceSettings(r.system, look);
+  r.Step();
+  CHECK_EQ(r.overlay->styles().Resolve(nullptr)->theme, std::string("ps3"));
+  r.overlay->Open();
+  r.Settle();
+  r.Tap([](OverlayInput& in) { in.pad_start = true; });
+  for (const auto& id : r.V().setting_rows) CHECK(id != "theme");
 }
 
 TEST(overlay_settings_volume_and_sound) {
@@ -812,22 +883,34 @@ TEST(overlay_settings_mouse) {
     opened = r.V().settings;
   }
   CHECK(opened);
-  // Hover, then click the second set's switch row: off.
-  bool toggled = false;
-  for (float y = 150; y < 700 && !toggled; y += 8) {
-    OverlayInput in;
-    in.mouse_present = true;
-    in.mouse_x = 640;
-    in.mouse_y = y;
-    r.Step(in);
-    if (r.V().setting_selected != "set:c") continue;
-    in.mouse_left = true;
-    r.Step(in);
-    in.mouse_left = false;
-    r.Step(in);
-    toggled = true;
-  }
-  CHECK(toggled);
+  // Hover a row, then click it.
+  auto click_row = [&](const std::string& id) {
+    for (float y = 150; y < 700; y += 8) {
+      OverlayInput in;
+      in.mouse_present = true;
+      in.mouse_x = 640;
+      in.mouse_y = y;
+      r.Step(in);
+      if (r.V().setting_selected != id) continue;
+      // Let any scroll the new selection started finish under the mouse.
+      for (int k = 0; k < 30; ++k) r.Step(in);
+      if (r.V().setting_selected != id) continue;
+      in.mouse_left = true;
+      r.Step(in);
+      in.mouse_left = false;
+      r.Step(in);
+      return true;
+    }
+    return false;
+  };
+  // A theme row steps to the next theme.
+  CHECK(click_row("theme"));
+  CHECK_EQ(GetAppearanceSettings(r.system).theme, std::string("auto"));
+  // The second set's switch row: off, once the pad has scrolled it into view.
+  // (The pad leaves the selection on set:x, so only hovering set:c selects it.)
+  while (r.V().setting_selected != "set:c") r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  r.Tap([](OverlayInput& in) { in.pad_up = true; });
+  CHECK(click_row("set:c"));
   CHECK(!r.system.IsSetEnabled("c"));
 }
 
@@ -845,6 +928,7 @@ TEST(overlay_settings_options_hide_it) {
 
   OverlayOptions some;
   some.settings_sound = false;
+  some.settings_appearance = false;
   some.settings_reset = false;
   Rig q(some);
   q.overlay->Open();

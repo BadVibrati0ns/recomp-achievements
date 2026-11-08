@@ -7,6 +7,8 @@
 #include <fstream>
 #include <set>
 
+#include "recomp/achievements/system.h"
+
 namespace recomp::achievements::ui {
 
 using nlohmann::json;
@@ -469,6 +471,75 @@ Style ClassicTheme() {
 }  // namespace
 
 std::vector<std::string> BuiltinThemeNames() { return {"xbox360", "ps3", "retro", "minimal", "classic"}; }
+
+// ---- The player's appearance ------------------------------------------------
+
+AppearanceSettings GetAppearanceSettings(const System& system) {
+  AppearanceSettings out;
+  const json j = system.GetSetting(kAppearanceSetting);
+  if (!j.is_object()) return out;
+  if (const auto it = j.find("theme"); it != j.end() && it->is_string()) out.theme = it->get<std::string>();
+  const auto& sizes = AppearanceSizes();
+  auto size = [&](const char* key, float& field) {
+    if (const auto it = j.find(key); it != j.end() && it->is_number())
+      field = std::clamp(it->get<float>(), sizes.front(), sizes.back());
+  };
+  size("popup_size", out.popup_size);
+  size("list_size", out.list_size);
+  return out;
+}
+
+void SetAppearanceSettings(System& system, const AppearanceSettings& settings) {
+  // Two decimals, as for the sound volume.
+  auto round = [](float v) { return std::round(v * 100.0) / 100.0; };
+  system.SetSetting(kAppearanceSetting, {{"theme", settings.theme},
+                                         {"popup_size", round(settings.popup_size)},
+                                         {"list_size", round(settings.list_size)}});
+}
+
+std::vector<std::string> AppearanceThemes() {
+  std::vector<std::string> out = {"", "auto"};
+  for (auto& t : BuiltinThemeNames()) out.push_back(std::move(t));
+  return out;
+}
+
+std::string AppearanceThemeName(std::string_view theme) {
+  if (theme.empty()) return "Game's choice";
+  const std::string l = Lower(theme);
+  if (l == "auto" || l == "default") return "By platform";
+  if (l == "xbox360") return "Xbox 360";
+  if (l == "ps3") return "PlayStation 3";
+  if (l == "retro") return "Retro";
+  if (l == "minimal") return "Minimal";
+  if (l == "classic") return "Classic";
+  return std::string(theme);
+}
+
+const std::vector<float>& AppearanceSizes() {
+  static const std::vector<float> sizes = {0.75f, 0.85f, 1.0f, 1.15f, 1.3f, 1.5f};
+  return sizes;
+}
+
+float StepAppearanceSize(float size, int dir) {
+  const auto& sizes = AppearanceSizes();
+  // The offered size nearest to this one, then one step from it.
+  size_t at = 0;
+  for (size_t i = 1; i < sizes.size(); ++i)
+    if (std::fabs(sizes[i] - size) < std::fabs(sizes[at] - size)) at = i;
+  if (dir > 0 && at + 1 < sizes.size()) ++at;
+  if (dir < 0 && at > 0) --at;
+  return sizes[at];
+}
+
+std::string StepAppearanceTheme(std::string_view theme, int dir) {
+  const auto themes = AppearanceThemes();
+  const std::string l = Lower(theme) == "default" ? "auto" : Lower(theme);
+  size_t at = 0;
+  for (size_t i = 0; i < themes.size(); ++i)
+    if (themes[i] == l) at = i;
+  const size_t n = themes.size();
+  return themes[(at + n + (dir > 0 ? 1 : dir < 0 ? n - 1 : 0)) % n];
+}
 
 Style BuiltinTheme(std::string_view name, bool* found) {
   const std::string l = Lower(name);
@@ -1027,6 +1098,14 @@ void StyleManager::SetThemeOverride(std::string theme) {
   ++generation_;
 }
 
+void StyleManager::SetPlayerAppearance(const AppearanceSettings& appearance) {
+  std::lock_guard lock(mutex_);
+  if (appearance == appearance_) return;
+  appearance_ = appearance;
+  cache_.clear();
+  ++generation_;
+}
+
 std::shared_ptr<const Style> StyleManager::Resolve(const AchievementSet* set) const {
   std::lock_guard lock(mutex_);
   if (!set) return ResolveLocked({}, Platform::kCustom, nullptr);
@@ -1075,8 +1154,8 @@ std::shared_ptr<const Style> StyleManager::ResolveLocked(std::string_view set_id
 
   std::string theme;
   size_t start = 0;
-  if (!theme_override_.empty()) {
-    theme = theme_override_;
+  if (!appearance_.theme.empty() || !theme_override_.empty()) {
+    theme = !appearance_.theme.empty() ? appearance_.theme : theme_override_;
     start = user_start;  // A forced theme keeps only the player's tweaks.
   } else {
     for (size_t i = patches.size(); i-- > 0;) {
@@ -1105,6 +1184,9 @@ std::shared_ptr<const Style> StyleManager::ResolveLocked(std::string_view set_id
     ApplyStyleJson(*style, *patches[i].j, *patches[i].base_dir, &w);
     for (auto& s : w) warnings.push_back(patches[i].where + ": " + s);
   }
+
+  style->scale *= appearance_.popup_size;
+  style->viewer.scale *= appearance_.list_size;
 
   for (auto& w : warnings) {
     if (std::find(warnings_.begin(), warnings_.end(), w) == warnings_.end()) warnings_.push_back(w);

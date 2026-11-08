@@ -128,6 +128,7 @@ struct OverlayOptions {
   // The settings page (Start / F2, or the gear in the header). Hide it, or
   // the sections a game already offers in its own menus.
   bool show_settings = true;
+  bool settings_appearance = true;  // Theme, popup size and list size.
   bool settings_sound = true;  // Popup sound on/off and volume.
   bool settings_sets = true;   // Turning each achievement set on and off.
   bool settings_reset = true;  // Resetting chosen achievements, a set, or everything.

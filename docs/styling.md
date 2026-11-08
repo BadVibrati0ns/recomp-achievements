@@ -49,6 +49,23 @@ plain PS3 look plus their own tweaks, not the game's colours on top of it.
 (e.g. from an in-game settings menu) forces a theme and keeps only the user
 layer's tweaks.
 
+### The player's theme and sizes
+
+The settings pages of both viewers offer a **Theme** and two sizes, saved for the
+game as `"appearance"` in its [settings file](json-format.md#settings-file), not
+in a style file. They sit above every layer (`StyleManager::SetPlayerAppearance`, which the
+overlay and `PopupUi` call themselves when the setting changes):
+
+- `theme`: `""` keeps the game's choice; `"auto"` is the platform's default; any
+  built-in name forces that theme, beating `SetThemeOverride`. Like a forced
+  theme, it keeps only the global and user layers' tweaks.
+- `popup_size` multiplies the resolved `scale` (the popups); `list_size`
+  multiplies `viewer.scale` (the overlay's list, or the font scale of the ImGui
+  list). The offered sizes are 75%, 85%, 100%, 115%, 130% and 150%.
+
+`ui::GetAppearanceSettings()` / `SetAppearanceSettings()` read and write it, for
+a game that offers these in its own menu.
+
 Files may contain `//` and `/* */` comments. Keys starting with `_` or `$`, and
 `comment`, are ignored. Unknown keys and wrong types are reported through
 `StyleManager::warnings()` and otherwise ignored; the rest of the file still

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "recomp/achievements/system.h"
 #include "recomp/achievements/ui/painter.h"
 #include "recomp/achievements/ui/style.h"
 #include "test.h"
@@ -395,4 +396,63 @@ TEST(style_small_screens_keep_their_size) {
   CHECK(near(PopupScale(*m.Resolve(nullptr), {1280, 800}), 1.3f));
   m.SetGlobalStyle(nlohmann::json::parse(R"({"small_screen_height": 0})"));
   CHECK(near(PopupScale(*m.Resolve(nullptr), {1280, 800}), 800.0f / 1080.0f));
+}
+
+TEST(appearance_settings_round_trip_and_steps) {
+  System system;
+  CHECK(GetAppearanceSettings(system) == AppearanceSettings{});
+  AppearanceSettings look;
+  look.theme = "retro";
+  look.popup_size = 1.3f;
+  look.list_size = 0.85f;
+  SetAppearanceSettings(system, look);
+  CHECK(GetAppearanceSettings(system) == look);
+  // Out-of-range sizes in the file are clamped to the offered ones.
+  system.SetSetting(kAppearanceSetting, {{"theme", "ps3"}, {"popup_size", 9.0}, {"list_size", 0.1}});
+  CHECK_NEAR(GetAppearanceSettings(system).popup_size, 1.5f, 1e-6);
+  CHECK_NEAR(GetAppearanceSettings(system).list_size, 0.75f, 1e-6);
+
+  CHECK_NEAR(StepAppearanceSize(1.0f, 1), 1.15f, 1e-6);
+  CHECK_NEAR(StepAppearanceSize(1.0f, -1), 0.85f, 1e-6);
+  CHECK_NEAR(StepAppearanceSize(1.5f, 1), 1.5f, 1e-6);
+  CHECK_NEAR(StepAppearanceSize(1.07f, 0), 1.0f, 1e-6);  // Snaps to the nearest.
+  CHECK_EQ(StepAppearanceTheme("", 1), std::string("auto"));
+  CHECK_EQ(StepAppearanceTheme("", -1), std::string("classic"));
+  CHECK_EQ(StepAppearanceTheme("classic", 1), std::string(""));
+  CHECK_EQ(AppearanceThemeName(""), std::string("Game's choice"));
+  CHECK_EQ(AppearanceThemeName("ps3"), std::string("PlayStation 3"));
+}
+
+TEST(player_appearance_beats_the_game_and_the_override) {
+  StyleManager m;
+  m.SetGameStyle({{"theme", "retro"}, {"scale", 1.2}});
+  m.SetThemeOverride("minimal");
+  CHECK_EQ(m.Resolve(nullptr)->theme, std::string("minimal"));
+  const uint64_t gen = m.generation();
+  AppearanceSettings look;
+  look.theme = "xbox360";
+  look.popup_size = 1.5f;
+  look.list_size = 0.75f;
+  m.SetPlayerAppearance(look);
+  CHECK(m.generation() != gen);
+  auto st = m.Resolve(nullptr);
+  CHECK_EQ(st->theme, std::string("xbox360"));
+  CHECK_NEAR(st->scale, BuiltinTheme("xbox360").scale * 1.5f, 1e-5);
+  CHECK_NEAR(st->viewer.scale, BuiltinTheme("xbox360").viewer.scale * 0.75f, 1e-5);
+  // The same choice again changes nothing.
+  const uint64_t gen2 = m.generation();
+  m.SetPlayerAppearance(look);
+  CHECK_EQ(m.generation(), gen2);
+  // "Game's choice" with default sizes leaves the game's style (and the override) alone.
+  m.SetPlayerAppearance({});
+  CHECK_EQ(m.Resolve(nullptr)->theme, std::string("minimal"));
+  m.SetThemeOverride("");
+  st = m.Resolve(nullptr);
+  CHECK_EQ(st->theme, std::string("retro"));
+  CHECK_NEAR(st->scale, 1.2f, 1e-5);
+  // "By platform": the platform's default theme.
+  look = {};
+  look.theme = "auto";
+  m.SetPlayerAppearance(look);
+  CHECK_EQ(m.Resolve("s", Platform::kPlayStation3)->theme, std::string(DefaultThemeFor(Platform::kPlayStation3)));
 }

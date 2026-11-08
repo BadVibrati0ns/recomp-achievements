@@ -97,6 +97,9 @@ class PopupUi {
   bool list_open_ = false;
   bool back_held_ = false;  // B / Esc last frame: closing needs a fresh press.
   uint64_t bindings_generation_ = 0;
+  uint64_t appearance_generation_ = 0;
+  // The player's theme and sizes onto the styles, when the settings changed.
+  void ApplyAppearance();
 };
 
 }  // namespace recomp::achievements::ui

@@ -133,7 +133,7 @@ labels playstation    exec <shell command>  poll
 
 `--in-game` renders something else: a stand-in game ("Overlay Demo") that writes to the first `--library`,
 with the in-game viewer over it, so a script can show the viewer's [All games page](overlay.md#all-games).
-When that game is asked to quit, it says so on screen.
+When that game is asked to quit, it says so on screen, and F9 shows a test popup.
 
 The grid and game page are in `recomp::achievements_ui_base` (`include/recomp/achievements/app/`), so the
 in-game viewer can show them too; the app adds the window and scripts.

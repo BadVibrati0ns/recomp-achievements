@@ -19,6 +19,10 @@
 #include "recomp/achievements/config_dir.h"
 #include "recomp/achievements/types.h"
 
+namespace recomp::achievements {
+class System;
+}
+
 namespace recomp::achievements::ui {
 
 // Linear 0..1 RGBA. JSON accepts "#RRGGBB", "#RRGGBBAA" or [r, g, b(, a)] in 0..255.
@@ -248,6 +252,31 @@ using recomp::achievements::GlobalConfigDir;
 // Leaves existing files alone. Returns the folder, or empty on failure.
 std::filesystem::path EnsureGlobalConfigDir();
 
+// ---- The player's appearance ------------------------------------------------
+// The theme and sizes the player picks on the settings pages, kept for this
+// game in the System's settings ("appearance": {"theme": "", "popup_size": 1,
+// "list_size": 1}). The overlay and PopupUi apply it to their styles
+// themselves (StyleManager::SetPlayerAppearance).
+struct AppearanceSettings {
+  std::string theme;         // "": the game's choice; "auto": by platform; else a built-in theme.
+  float popup_size = 1.0f;   // Multiplies the popups' scale.
+  float list_size = 1.0f;    // Multiplies the achievement list's scale.
+  bool operator==(const AppearanceSettings&) const = default;
+};
+inline constexpr std::string_view kAppearanceSetting = "appearance";
+AppearanceSettings GetAppearanceSettings(const System& system);
+void SetAppearanceSettings(System& system, const AppearanceSettings& settings);
+// The themes a settings page offers, in order: "", "auto", then the built-ins.
+std::vector<std::string> AppearanceThemes();
+// "Game's choice", "By platform", "Xbox 360", ...
+std::string AppearanceThemeName(std::string_view theme);
+// The sizes a settings page offers: 75% to 150%.
+const std::vector<float>& AppearanceSizes();
+// The next offered size up (dir > 0) or down from size, clamped at the ends.
+float StepAppearanceSize(float size, int dir);
+// The theme dir steps away from theme in AppearanceThemes(), wrapping around.
+std::string StepAppearanceTheme(std::string_view theme, int dir);
+
 class StyleManager {
  public:
   using Hook = std::function<void(Style&, const AchievementSet* set)>;
@@ -270,6 +299,11 @@ class StyleManager {
   void SetGameHook(Hook hook);
   // Forces a theme for everything, overriding the layers' choice ("" clears).
   void SetThemeOverride(std::string theme);
+  // The player's appearance, above everything else: its theme beats the
+  // layers and SetThemeOverride (keeping the player's own JSON tweaks), and its
+  // sizes multiply the resolved scale and viewer.scale. Bumps generation()
+  // only when it changes.
+  void SetPlayerAppearance(const AppearanceSettings& appearance);
 
   // set may be null (custom platform, no set overrides).
   std::shared_ptr<const Style> Resolve(const AchievementSet* set) const;
@@ -294,6 +328,7 @@ class StyleManager {
   Layer game_, global_, user_;
   Hook hook_;
   std::string theme_override_;
+  AppearanceSettings appearance_;
   uint64_t generation_ = 1;
   mutable std::map<std::string, std::shared_ptr<const Style>, std::less<>> cache_;
   mutable std::vector<std::string> warnings_;
