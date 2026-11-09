@@ -486,6 +486,10 @@ AppearanceSettings GetAppearanceSettings(const System& system) {
   };
   size("popup_size", out.popup_size);
   size("list_size", out.list_size);
+  if (const auto it = j.find("popup_seconds"); it != j.end() && it->is_number()) {
+    const float s = it->get<float>();
+    out.popup_seconds = s > 0.0f ? std::clamp(s, 1.0f, 60.0f) : 0.0f;
+  }
   return out;
 }
 
@@ -494,7 +498,8 @@ void SetAppearanceSettings(System& system, const AppearanceSettings& settings) {
   auto round = [](float v) { return std::round(v * 100.0) / 100.0; };
   system.SetSetting(kAppearanceSetting, {{"theme", settings.theme},
                                          {"popup_size", round(settings.popup_size)},
-                                         {"list_size", round(settings.list_size)}});
+                                         {"list_size", round(settings.list_size)},
+                                         {"popup_seconds", round(settings.popup_seconds)}});
 }
 
 std::vector<std::string> AppearanceThemes() {
@@ -539,6 +544,28 @@ std::string StepAppearanceTheme(std::string_view theme, int dir) {
     if (themes[i] == l) at = i;
   const size_t n = themes.size();
   return themes[(at + n + (dir > 0 ? 1 : dir < 0 ? n - 1 : 0)) % n];
+}
+
+const std::vector<float>& AppearancePopupTimes() {
+  static const std::vector<float> times = {0.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f, 15.0f, 20.0f};
+  return times;
+}
+
+float StepAppearancePopupTime(float seconds, int dir) {
+  const auto& times = AppearancePopupTimes();
+  size_t at = 0;
+  for (size_t i = 1; i < times.size(); ++i)
+    if (std::fabs(times[i] - seconds) < std::fabs(times[at] - seconds)) at = i;
+  if (dir > 0 && at + 1 < times.size()) ++at;
+  if (dir < 0 && at > 0) --at;
+  return times[at];
+}
+
+std::string AppearancePopupTimeName(float seconds) {
+  if (seconds <= 0.0f) return "Game's choice";
+  char buf[32];
+  std::snprintf(buf, sizeof buf, seconds == std::floor(seconds) ? "%.0f s" : "%.1f s", seconds);
+  return buf;
 }
 
 Style BuiltinTheme(std::string_view name, bool* found) {
@@ -1187,6 +1214,12 @@ std::shared_ptr<const Style> StyleManager::ResolveLocked(std::string_view set_id
 
   style->scale *= appearance_.popup_size;
   style->viewer.scale *= appearance_.list_size;
+  if (appearance_.popup_seconds > 0.0f) {
+    // Progress popups keep their length relative to unlock popups.
+    const float k = style->unlock.timing.hold > 0.0f ? appearance_.popup_seconds / style->unlock.timing.hold : 1.0f;
+    style->unlock.timing.hold = appearance_.popup_seconds;
+    style->progress.timing.hold *= k;
+  }
 
   for (auto& w : warnings) {
     if (std::find(warnings_.begin(), warnings_.end(), w) == warnings_.end()) warnings_.push_back(w);

@@ -261,6 +261,9 @@ struct AppearanceSettings {
   std::string theme;         // "": the game's choice; "auto": by platform; else a built-in theme.
   float popup_size = 1.0f;   // Multiplies the popups' scale.
   float list_size = 1.0f;    // Multiplies the achievement list's scale.
+  // Seconds an unlock popup stays fully shown (its timing.hold); progress
+  // popups scale with it. 0: the game's choice.
+  float popup_seconds = 0.0f;
   bool operator==(const AppearanceSettings&) const = default;
 };
 inline constexpr std::string_view kAppearanceSetting = "appearance";
@@ -276,6 +279,12 @@ const std::vector<float>& AppearanceSizes();
 float StepAppearanceSize(float size, int dir);
 // The theme dir steps away from theme in AppearanceThemes(), wrapping around.
 std::string StepAppearanceTheme(std::string_view theme, int dir);
+// The popup times a settings page offers: 0 (the game's choice), then 2 s to 20 s.
+const std::vector<float>& AppearancePopupTimes();
+// The next offered popup time up (dir > 0) or down, clamped at the ends.
+float StepAppearancePopupTime(float seconds, int dir);
+// "Game's choice", "2 s", ...
+std::string AppearancePopupTimeName(float seconds);
 
 class StyleManager {
  public:

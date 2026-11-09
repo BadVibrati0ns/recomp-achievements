@@ -51,7 +51,7 @@ layer's tweaks.
 
 ### The player's theme and sizes
 
-The settings pages of both viewers offer a **Theme** and two sizes, saved for the
+The settings pages of both viewers offer a **Theme**, two sizes and a popup time, saved for the
 game as `"appearance"` in its [settings file](json-format.md#settings-file), not
 in a style file. They sit above every layer (`StyleManager::SetPlayerAppearance`, which the
 overlay and `PopupUi` call themselves when the setting changes):
@@ -63,6 +63,10 @@ overlay and `PopupUi` call themselves when the setting changes):
   multiplies `viewer.scale` (the overlay's list, or the font scale of the ImGui
   list). The offered sizes are 75%, 85%, 100%, 115%, 130% and 150%. The overlay's
   list keeps room for two rows, so a short window caps how far it grows.
+- `popup_seconds`: `0` keeps the game's timing; otherwise it replaces
+  `unlock.timing.hold`, and `progress.timing.hold` scales by the same ratio, so
+  progress popups stay as much shorter as the style made them. The fade in and
+  out are unchanged. The offered times are 2, 3, 4, 5, 6, 8, 10, 15 and 20 s.
 
 `ui::GetAppearanceSettings()` / `SetAppearanceSettings()` read and write it, for
 a game that offers these in its own menu.

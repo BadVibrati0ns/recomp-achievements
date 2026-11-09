@@ -30,7 +30,7 @@ list of its own.
 - **Player settings, in game:** the viewer's settings page turns each achievement set on and off (a set
   that's off hides its points, can't unlock and keeps its progress; sets can start off), resets chosen
   achievements, a set or everything behind a hold-to-confirm, and sets the popup sound and volume, the
-  theme, and the size of the popups and of the list. The
+  theme, the size of the popups and of the list, and how long popups stay up. The
   choices are saved for the game in `achievement_settings.json` next to the saves, so a game only passes
   its storage folder. `SplitSet()` moves achievements a recomp can't support (online-only ones) into an
   optional set of their own.
@@ -161,7 +161,7 @@ python3 -m unittest discover -s tools/tests
 Everything builds offline.
 
 ImGui games get the same player settings from `AchievementListWindow` (and `PopupUi::list()`): a Settings
-button with the theme and sizes, the popup sound switch and volume, a checkbox per set, and resets of chosen
+button with the theme, sizes and popup time, the popup sound switch and volume, a checkbox per set, and resets of chosen
 achievements, a set or everything, each behind a confirmation dialog. `PopupUi` applies the sound, theme and
 sizes to its popups and list.
 

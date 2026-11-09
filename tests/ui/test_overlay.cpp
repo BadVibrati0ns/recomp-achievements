@@ -575,8 +575,8 @@ TEST(overlay_settings_page_navigation) {
   r.Tap([](OverlayInput& in) { in.pad_start = true; });
   auto v = r.V();
   CHECK(v.settings);
-  CHECK_EQ(v.setting_rows, (std::vector<std::string>{"sound", "volume", "theme", "popup_size", "list_size", "set:x",
-                                                     "set:c", "reset:pick", "reset:set:x", "reset:set:c", "reset:all"}));
+  CHECK_EQ(v.setting_rows, (std::vector<std::string>{"sound", "volume", "theme", "popup_size", "popup_time",
+                                                     "list_size", "set:x", "set:c", "reset:pick", "reset:set:x", "reset:set:c", "reset:all"}));
   CHECK_EQ(v.setting_selected, std::string("sound"));
   r.Tap([](OverlayInput& in) { in.pad_down = true; });
   CHECK_EQ(r.V().setting_selected, std::string("volume"));
@@ -688,6 +688,26 @@ TEST(overlay_settings_theme_and_sizes) {
   CHECK_NEAR(GetAppearanceSettings(r.system).popup_size, 1.5f, 1e-6);
   r.Tap([](OverlayInput& in) { in.pad_a = true; });
   CHECK_NEAR(GetAppearanceSettings(r.system).popup_size, 0.75f, 1e-6);
+
+  // Popup time: from the game's choice to 2 s, which becomes the unlock
+  // popup's hold; progress popups keep their length relative to it.
+  r.Tap([](OverlayInput& in) { in.pad_down = true; });
+  CHECK_EQ(r.V().setting_selected, std::string("popup_time"));
+  const Style game = *r.overlay->styles().Resolve(nullptr);
+  r.Tap([](OverlayInput& in) { in.pad_right = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_seconds, 2.0f, 1e-6);
+  CHECK_NEAR(r.system.GetSetting("appearance")["popup_seconds"].get<double>(), 2.0, 1e-9);
+  r.Step();
+  auto timed = r.overlay->styles().Resolve(nullptr);
+  CHECK_NEAR(timed->unlock.timing.hold, 2.0f, 1e-5);
+  CHECK_NEAR(timed->progress.timing.hold, game.progress.timing.hold * 2.0f / game.unlock.timing.hold, 1e-5);
+  CHECK_NEAR(timed->unlock.timing.in, game.unlock.timing.in, 1e-6);
+  // Left from the smallest goes back to the game's choice and stops there; A wraps.
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  r.Tap([](OverlayInput& in) { in.pad_left = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_seconds, 0.0f, 1e-6);
+  r.Tap([](OverlayInput& in) { in.pad_a = true; });
+  CHECK_NEAR(GetAppearanceSettings(r.system).popup_seconds, 2.0f, 1e-6);
 
   // List size grows the viewer itself.
   r.Tap([](OverlayInput& in) { in.pad_down = true; });

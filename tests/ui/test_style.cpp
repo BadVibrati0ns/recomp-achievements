@@ -405,6 +405,7 @@ TEST(appearance_settings_round_trip_and_steps) {
   look.theme = "retro";
   look.popup_size = 1.3f;
   look.list_size = 0.85f;
+  look.popup_seconds = 8.0f;
   SetAppearanceSettings(system, look);
   CHECK(GetAppearanceSettings(system) == look);
   // Out-of-range sizes in the file are clamped to the offered ones.
@@ -421,6 +422,19 @@ TEST(appearance_settings_round_trip_and_steps) {
   CHECK_EQ(StepAppearanceTheme("classic", 1), std::string(""));
   CHECK_EQ(AppearanceThemeName(""), std::string("Game's choice"));
   CHECK_EQ(AppearanceThemeName("ps3"), std::string("PlayStation 3"));
+
+  // Popup times: 0 is the game's choice; others are clamped to 1..60 s.
+  system.SetSetting(kAppearanceSetting, {{"popup_seconds", 500.0}});
+  CHECK_NEAR(GetAppearanceSettings(system).popup_seconds, 60.0f, 1e-6);
+  system.SetSetting(kAppearanceSetting, {{"popup_seconds", -3.0}});
+  CHECK_NEAR(GetAppearanceSettings(system).popup_seconds, 0.0f, 1e-6);
+  CHECK_NEAR(StepAppearancePopupTime(0.0f, 1), 2.0f, 1e-6);
+  CHECK_NEAR(StepAppearancePopupTime(0.0f, -1), 0.0f, 1e-6);
+  CHECK_NEAR(StepAppearancePopupTime(4.4f, 1), 5.0f, 1e-6);
+  CHECK_NEAR(StepAppearancePopupTime(20.0f, 1), 20.0f, 1e-6);
+  CHECK_EQ(AppearancePopupTimeName(0.0f), std::string("Game's choice"));
+  CHECK_EQ(AppearancePopupTimeName(8.0f), std::string("8 s"));
+  CHECK_EQ(AppearancePopupTimeName(2.5f), std::string("2.5 s"));
 }
 
 TEST(player_appearance_beats_the_game_and_the_override) {

@@ -173,6 +173,7 @@ constexpr std::string_view kRowSound = "sound";
 constexpr std::string_view kRowVolume = "volume";
 constexpr std::string_view kRowTheme = "theme";
 constexpr std::string_view kRowPopupSize = "popup_size";
+constexpr std::string_view kRowPopupTime = "popup_time";
 constexpr std::string_view kRowListSize = "list_size";
 constexpr std::string_view kRowResetPick = "reset:pick";
 constexpr std::string_view kRowResetAll = "reset:all";
@@ -393,7 +394,7 @@ struct Overlay::Impl {
 
   // The settings page: headings and rows, in list space like entries.
   struct SettingRow {
-    enum Kind { kHeading, kTheme, kPopupSize, kListSize, kSound, kVolume, kSet, kResetPick, kResetSet, kResetAll } kind = kHeading;
+    enum Kind { kHeading, kTheme, kPopupSize, kPopupTime, kListSize, kSound, kVolume, kSet, kResetPick, kResetSet, kResetAll } kind = kHeading;
     std::string id, set_id;
     std::string title, detail, aside;  // aside: a heading's right-hand note.
     bool on = false;
@@ -888,6 +889,7 @@ struct Overlay::Impl {
            appearance.theme.empty() ? "The look this game picked for its popups and this list."
                                     : "The look of the popups and this list.");
       item(SettingRow::kPopupSize, std::string(kRowPopupSize), "Popup size", "How big unlock and progress popups are.");
+      item(SettingRow::kPopupTime, std::string(kRowPopupTime), "Popup time", "How long an unlock popup stays on screen.");
       item(SettingRow::kListSize, std::string(kRowListSize), "List size",
            ListSizeCapped() ? "Limited by the window's size."
                             : "How big this list and its text are.");
@@ -1200,6 +1202,7 @@ struct Overlay::Impl {
       case SettingRow::kSound: SetSoundOn(!sound.enabled); return true;
       case SettingRow::kTheme:
       case SettingRow::kPopupSize:
+      case SettingRow::kPopupTime:
       case SettingRow::kListSize: StepAppearance(r.kind, 1, true); return true;
       case SettingRow::kSet: system.SetSetEnabled(r.set_id, !r.on); return true;
       case SettingRow::kResetPick:
@@ -1225,6 +1228,7 @@ struct Overlay::Impl {
       case SettingRow::kSound: SetSoundOn(dir > 0); break;
       case SettingRow::kTheme:
       case SettingRow::kPopupSize:
+      case SettingRow::kPopupTime:
       case SettingRow::kListSize: StepAppearance(r.kind, dir, false); break;
       case SettingRow::kSet:
         if (r.on != (dir > 0)) system.SetSetEnabled(r.set_id, dir > 0);
@@ -1244,6 +1248,11 @@ struct Overlay::Impl {
     };
     if (kind == SettingRow::kTheme) next.theme = StepAppearanceTheme(appearance.theme, dir);
     else if (kind == SettingRow::kPopupSize) step(next.popup_size);
+    else if (kind == SettingRow::kPopupTime) {
+      const auto& times = AppearancePopupTimes();
+      const float stepped = StepAppearancePopupTime(next.popup_seconds, dir);
+      next.popup_seconds = wrap && stepped == next.popup_seconds ? (dir > 0 ? times.front() : times.back()) : stepped;
+    }
     else if (kind == SettingRow::kListSize) step(next.list_size);
     SetAppearance(next);
   }
@@ -1253,6 +1262,7 @@ struct Overlay::Impl {
     auto pct = [](float v) { return std::to_string(static_cast<int>(std::lround(v * 100))) + "%"; };
     if (kind == SettingRow::kTheme) return AppearanceThemeName(appearance.theme);
     if (kind == SettingRow::kPopupSize) return pct(appearance.popup_size);
+    if (kind == SettingRow::kPopupTime) return AppearancePopupTimeName(appearance.popup_seconds);
     return pct(appearance.list_size);
   }
 
@@ -1982,6 +1992,7 @@ struct Overlay::Impl {
       }
       case SettingRow::kTheme:
       case SettingRow::kPopupSize:
+      case SettingRow::kPopupTime:
       case SettingRow::kListSize: {
         // The choice, with arrows either side when selected: left / right change it.
         const std::string v = AppearanceValue(row.kind);
@@ -2345,6 +2356,7 @@ struct Overlay::Impl {
           case SettingRow::kTheme: x += DrawHint(Action::kAdjust, "Theme", x, fy, s, th, ease) + gap; break;
           case SettingRow::kPopupSize:
           case SettingRow::kListSize: x += DrawHint(Action::kAdjust, "Size", x, fy, s, th, ease) + gap; break;
+          case SettingRow::kPopupTime: x += DrawHint(Action::kAdjust, "Time", x, fy, s, th, ease) + gap; break;
           case SettingRow::kResetPick: x += DrawHint(Action::kDetails, "Choose", x, fy, s, th, ease) + gap; break;
           case SettingRow::kResetSet:
           case SettingRow::kResetAll: x += DrawHint(Action::kDetails, "Hold to reset", x, fy, s, th, ease) + gap; break;

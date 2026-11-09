@@ -228,7 +228,7 @@ same way as saves (to a `.tmp` file, then renamed):
   },
   "settings": {
     "popup_sound": { "enabled": true, "volume": 0.7 },
-    "appearance": { "theme": "", "popup_size": 1.0, "list_size": 1.15 }
+    "appearance": { "theme": "", "popup_size": 1.0, "list_size": 1.15, "popup_seconds": 0 }
   }
 }
 ```
@@ -236,6 +236,6 @@ same way as saves (to a `.tmp` file, then renamed):
 `sets` holds only choices the player made (other sets use their `enabled`), including ones for sets that
 aren't loaded. `settings` is free-form for the UI layer (`System::GetSetting` / `SetSetting`);
 `popup_sound` is the popup sound switch and volume (`ui::GetPopupSoundSettings`), and `appearance` the
-player's theme and sizes (`ui::GetAppearanceSettings`, [styling.md](styling.md#the-players-theme-and-sizes)).
+player's theme, sizes and popup time (`ui::GetAppearanceSettings`, [styling.md](styling.md#the-players-theme-and-sizes)).
 Unknown fields are kept,
 and an unreadable file is copied to `achievement_settings.json.corrupt` before it is replaced.

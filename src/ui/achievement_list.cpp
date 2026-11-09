@@ -149,6 +149,14 @@ void AchievementListWindow::DrawSettingsBody() {
       }
     };
     size("Popup size", look.popup_size);
+    ImGui::SetNextItemWidth(220);
+    if (ImGui::BeginCombo("Popup time", AppearancePopupTimeName(look.popup_seconds).c_str())) {
+      for (const float v : AppearancePopupTimes()) {
+        if (ImGui::Selectable(AppearancePopupTimeName(v).c_str(), std::abs(v - look.popup_seconds) < 0.01f))
+          look.popup_seconds = v, changed = true;
+      }
+      ImGui::EndCombo();
+    }
     size("List size", look.list_size);
     if (changed) SetAppearanceSettings(system_, look);
   }
