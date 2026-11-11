@@ -164,6 +164,17 @@ TEST(center_max_queued_drops_oldest) {
   CHECK(c.Active()[0].n.key == "d");
 }
 
+TEST(center_default_queue_holds_a_whole_list) {
+  // An old save unlocking 255 achievements at once: every popup waits its turn.
+  NotificationCenter c;
+  auto style = std::make_shared<Style>();
+  CHECK_EQ(style->max_queued, 255);
+  for (int i = 0; i < 300; ++i) c.Push(Unlock(("k" + std::to_string(i)).c_str(), style));
+  auto st = c.stats();
+  CHECK_EQ(st.queued_unlocks, 255u);
+  CHECK_EQ(st.dropped, 45u);
+}
+
 TEST(center_progress_coalesces_visible) {
   NotificationCenter c;
   int ticks = 0;

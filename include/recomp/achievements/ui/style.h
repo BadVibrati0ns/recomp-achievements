@@ -182,7 +182,9 @@ struct Style {
   // under it), so popups and the viewer stay readable on a handheld. 0: off.
   float small_screen_height = 800.0f;
   float small_screen_scale = 1.0f;
-  int max_queued = 16;  // Waiting unlock popups; older ones are dropped beyond this.
+  // Waiting unlock popups; older ones are dropped beyond this. Room for a
+  // whole list unlocking at once (an old save loaded for the first time).
+  int max_queued = 255;
   std::string font, font_bold;  // Names registered with the renderer; "" = default.
 
   PopupStyle unlock;

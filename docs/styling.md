@@ -85,7 +85,7 @@ applies.
 | `reference_height` | number  | Sizes are pixels at this display height (default 1080) and scale with the real height. |
 | `min_scale`, `max_scale` | number | Clamp for that automatic scale. |
 | `small_screen_height`, `small_screen_scale` | number | Small screens: at or under this height (default 800, a Steam Deck), the automatic scale is at least `small_screen_scale` (default 1), times height / `small_screen_height` below it. Also sizes the overlay's viewer. `small_screen_height: 0` turns it off. |
-| `max_queued`       | int     | Unlock popups that may wait; the oldest waiting one is dropped beyond this. |
+| `max_queued`       | int     | Unlock popups that may wait (default 255, at most 1000), so a whole list unlocking at once, e.g. an old save loaded for the first time, still shows each one in turn. The oldest waiting one is dropped beyond this. |
 | `font`, `font_bold`| string  | Font names the game registered with `ImGuiRenderer::RegisterFont`. |
 | `unlock`           | object  | Popup style for unlocks (below). |
 | `progress`         | object or bool | Popup style for progress steps, plus the keys below. `false` turns them off. |
