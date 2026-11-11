@@ -375,6 +375,34 @@ TEST(points_total_scales_up_and_down) {
   CHECK_EQ(Totaled({600}, 0), std::vector<uint32_t>{600});
 }
 
+TEST(points_total_keeps_the_order) {
+  // A RetroAchievements-style list: 314 achievements, 3338 points, scaled
+  // down to 1000. Shares raised to the 1-point minimum must not also win a
+  // rounding point, or some 3-pointers outrank every 5-pointer.
+  std::vector<uint32_t> points;
+  for (const auto& [value, count] : std::vector<std::pair<uint32_t, int>>{
+           {1, 6}, {2, 9}, {3, 127}, {4, 2}, {5, 30}, {10, 75}, {25, 53}, {50, 10}, {100, 2}})
+    points.insert(points.end(), count, value);
+  const auto scaled = Totaled(points, 1000);
+  uint64_t total = 0;
+  for (uint32_t p : scaled) total += p;
+  CHECK_EQ(total, 1000u);
+  for (size_t i = 0; i < points.size(); ++i)
+    for (size_t j = 0; j < points.size(); ++j)
+      if (points[i] < points[j]) CHECK(scaled[i] <= scaled[j]);
+  // And scaled up (690 to 1000) the same holds.
+  std::vector<uint32_t> up;
+  for (const auto& [value, count] : std::vector<std::pair<uint32_t, int>>{{5, 59}, {10, 33}, {13, 5}})
+    up.insert(up.end(), count, value);
+  const auto upped = Totaled(up, 1000);
+  total = 0;
+  for (uint32_t p : upped) total += p;
+  CHECK_EQ(total, 1000u);
+  for (size_t i = 0; i < up.size(); ++i)
+    for (size_t j = 0; j < up.size(); ++j)
+      if (up[i] < up[j]) CHECK(upped[i] <= upped[j]);
+}
+
 TEST(load_set_json_from_memory) {
   System system;
   std::string error;

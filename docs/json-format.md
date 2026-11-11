@@ -137,9 +137,14 @@ the older mod packs used.
 `points_total` scales in both directions, so a list worth 690 points with
 `"points_total": 1000` is worth exactly 1000, and one worth 1500 is too. Each
 value is rounded down (never below 1), and the points still missing go one each
-to the values that lost the most to rounding (the larger value, then the first,
-on ties), so they spread across the list instead of piling onto one
-achievement. A set already at the total, or with no points at all, is left
+to the values still owed the most (the larger value, then the first, on ties),
+so they spread across the list instead of piling onto one achievement. A value
+raised to the 1-point minimum is already over its share and gets nothing more,
+so an achievement never ends up worth more than one that was worth more before.
+Equal values can still differ by one point when the leftover points don't
+divide evenly among them: 30 five-pointers in a 3338-point list scaled to 1000
+come out as 10 at 1 and 20 at 2. A set that needs exact tiers can list its
+points already scaled instead. A set already at the total, or with no points at all, is left
 alone. When a set has both keys, `points_total` is used and `points_cap`
 ignored.
 

@@ -849,40 +849,48 @@ void ScalePointsTo(std::vector<Achievement>& achievements, uint32_t target) {
   if (target == 0 || total == 0 || total == target) return;
 
   // Largest remainder: round each share down (at least 1), then hand the
-  // missing points to the shares rounded down the most, so they spread
-  // instead of piling onto one achievement.
+  // missing points to the shares still owed the most, so they spread
+  // instead of piling onto one achievement. A share raised to the 1-point
+  // minimum is already over and comes last, which keeps a smaller value
+  // from ever ending up above a larger one.
   const double factor = static_cast<double>(target) / static_cast<double>(total);
-  std::vector<double> fraction(achievements.size(), -1.0);
+  std::vector<double> exact(achievements.size(), 0.0);
+  std::vector<uint32_t> source(achievements.size(), 0);
+  std::vector<size_t> order;
   uint64_t scaled_total = 0;
   for (size_t i = 0; i < achievements.size(); ++i) {
     auto& a = achievements[i];
+    source[i] = a.points;
     if (a.points == 0) continue;
-    const double exact = a.points * factor;
-    const double floor = std::floor(exact);
-    fraction[i] = exact - floor;
-    a.points = std::max(1u, static_cast<uint32_t>(floor));
+    exact[i] = a.points * factor;
+    a.points = std::max(1u, static_cast<uint32_t>(std::floor(exact[i])));
     scaled_total += a.points;
+    order.push_back(i);
   }
+  auto owed = [&](size_t i) { return exact[i] - achievements[i].points; };
   if (scaled_total < target) {
-    // Biggest remainder first; ties go to the larger value, then the earlier one.
-    std::vector<size_t> order;
-    for (size_t i = 0; i < achievements.size(); ++i)
-      if (fraction[i] >= 0.0) order.push_back(i);
+    // Most owed first; ties go to the larger value, then the earlier one.
     std::stable_sort(order.begin(), order.end(), [&](size_t x, size_t y) {
-      if (fraction[x] != fraction[y]) return fraction[x] > fraction[y];
-      return achievements[x].points > achievements[y].points;
+      if (owed(x) != owed(y)) return owed(x) > owed(y);
+      return source[x] > source[y];
     });
     for (size_t k = 0; scaled_total < target; k = (k + 1) % order.size()) {
       ++achievements[order[k]].points;
       ++scaled_total;
     }
   }
-  // Raising tiny shares to 1 can overshoot: trim the largest (the first, on ties).
+  // Raising tiny shares to 1 can overshoot: take points back from the shares
+  // most over what they're owed (the smaller value, then the later one, on ties).
   while (scaled_total > target) {
-    const auto it = std::max_element(achievements.begin(), achievements.end(),
-                                      [](const Achievement& x, const Achievement& y) { return x.points < y.points; });
-    if (it->points <= 1) break;
-    --it->points;
+    size_t best = achievements.size();
+    for (size_t i : order) {
+      if (achievements[i].points <= 1) continue;
+      if (best == achievements.size() || owed(i) < owed(best) ||
+          (owed(i) == owed(best) && source[i] <= source[best]))
+        best = i;
+    }
+    if (best == achievements.size()) break;
+    --achievements[best].points;
     --scaled_total;
   }
 }
