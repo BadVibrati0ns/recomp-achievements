@@ -56,6 +56,7 @@ unknown key is an error, which catches typos like `"descripton"`.
 | `platform`   | string  | `"custom"` | `custom`, `xbox360`, `ps3` or `retroachievements`. Picks the default popup style and how `platform_id` is read. |
 | `category`   | string  | `""`    | Category for achievements that don't set their own. |
 | `points_cap` | integer | `0`     | If the points add up to more than this they are scaled to exactly this total (see [Points cap](#points-cap)). `0`: no cap. |
+| `points_total` | integer | `0`   | The points are scaled up or down to exactly this total, e.g. `1000` (see [Points cap](#points-cap)). Beats `points_cap`. `0`: off. |
 | `enabled`    | boolean | `true`  | Whether the set counts until the player turns it on or off in the settings (see [Sets that are off](#sets-that-are-off)). `false` suits optional packs, such as achievements that need servers that are gone. |
 | `credits`    | array   | `[]`    | [Credits](#credits) for the whole set. |
 | `source`     | object  | `{}`    | Free-form provenance: game id, URL, export date, tool. |
@@ -132,6 +133,15 @@ scaled by `cap / total` and rounded (never below 1). If rounding leaves the
 total off by a little, the largest value (the first, on ties) is adjusted one
 point at a time until the total is exactly the cap. This is the same scaling
 the older mod packs used.
+
+`points_total` scales in both directions, so a list worth 690 points with
+`"points_total": 1000` is worth exactly 1000, and one worth 1500 is too. Each
+value is rounded down (never below 1), and the points still missing go one each
+to the values that lost the most to rounding (the larger value, then the first,
+on ties), so they spread across the list instead of piling onto one
+achievement. A set already at the total, or with no points at all, is left
+alone. When a set has both keys, `points_total` is used and `points_cap`
+ignored.
 
 ## Errors
 

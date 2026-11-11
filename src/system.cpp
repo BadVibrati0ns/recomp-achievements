@@ -633,7 +633,8 @@ void System::AddSet(AchievementSet set) {
     }
   }
   set.achievements = std::move(unique);
-  detail::ApplyPointsCap(set.achievements, set.points_cap);
+  if (set.points_total) detail::ScalePointsTo(set.achievements, set.points_total);
+  else detail::ApplyPointsCap(set.achievements, set.points_cap);
 
   std::lock_guard lock(impl_->mutex);
   auto shared = std::make_shared<const AchievementSet>(std::move(set));

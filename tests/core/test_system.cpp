@@ -144,6 +144,28 @@ TEST(add_set_applies_points_cap) {
   CHECK_EQ(totals.count, 2u);
 }
 
+TEST(add_set_applies_points_total) {
+  // A 97-achievement list worth 690 points, scaled up to exactly 1000.
+  System sys;
+  std::vector<Achievement> list;
+  for (int i = 0; i < 97; ++i) {
+    list.push_back(Make("a" + std::to_string(i)));
+    list.back().points = i < 59 ? 5 : i < 92 ? 10 : 13;  // 295 + 330 + 65.
+  }
+  AchievementSet set = Set("t", list);
+  set.points_total = 1000;
+  set.points_cap = 500;  // points_total wins.
+  sys.AddSet(set);
+  CHECK_EQ(sys.GetTotals("t").points, 1000u);
+  for (int i = 0; i < 97; ++i) CHECK(sys.Find("t:a" + std::to_string(i))->points >= 1u);
+  // The rounding remainder spreads: equal values stay within a point of
+  // each other, and bigger stays bigger.
+  auto pts = [&](int i) { return sys.Find("t:a" + std::to_string(i))->points; };
+  for (int i = 0; i < 59; ++i) CHECK_EQ(pts(i), 7u);   // 7.25
+  for (int i = 59; i < 92; ++i) CHECK(pts(i) == 14u || pts(i) == 15u);  // 14.49
+  for (int i = 92; i < 97; ++i) CHECK_EQ(pts(i), 19u);  // 18.84
+}
+
 TEST(manual_unlock_and_lookup) {
   System sys;
   Achievement a = Make("first");

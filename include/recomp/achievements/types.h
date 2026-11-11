@@ -92,6 +92,9 @@ struct AchievementSet {
   Platform platform = Platform::kCustom;
   std::string category;     // Default category for its achievements.
   uint32_t points_cap = 0;  // 0 = no cap; otherwise points are scaled to fit.
+  // 0 = off; otherwise points are scaled up or down to exactly this total
+  // (beats points_cap).
+  uint32_t points_total = 0;
   // Whether the set counts until the player turns it on or off
   // (System::SetSetEnabled). Off suits optional packs, e.g. achievements
   // that need servers that are gone.

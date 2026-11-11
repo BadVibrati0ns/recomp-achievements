@@ -35,6 +35,8 @@ TEST(native_minimal_defaults) {
   CHECK_EQ(set.title, "g");
   CHECK(set.platform == Platform::kCustom);
   CHECK_EQ(set.points_cap, 0u);
+  CHECK_EQ(set.points_total, 0u);
+  CHECK(!detail::NativeSetToJson(set)["set"].contains("points_total"));
   CHECK_EQ(set.achievements.size(), 1u);
   const Achievement& a = set.achievements[0];
   CHECK_EQ(a.local_id, "a");
@@ -100,6 +102,7 @@ TEST(native_every_field) {
   const auto set = ParseOk(json::parse(R"({
     "schema": "recomp-achievements/1",
     "set": {"id": "rc", "title": "Ratchet", "platform": "PS3", "points_cap": 100,
+            "points_total": 1000,
             "credits": ["Someone", {"name": "Port Team", "role": "port", "url": "https://example.com"}]},
     "achievements": [{
       "id": "plat", "platform_id": 0, "name": "All", "description": "d", "locked_description": "?",
@@ -111,6 +114,8 @@ TEST(native_every_field) {
     }]})"));
   CHECK(set.platform == Platform::kPlayStation3);
   CHECK_EQ(set.points_cap, 100u);
+  CHECK_EQ(set.points_total, 1000u);
+  CHECK_EQ(detail::NativeSetToJson(set)["set"]["points_total"], 1000);
   CHECK_EQ(set.credits.size(), 2u);
   CHECK_EQ(set.credits[0].name, "Someone");
   CHECK_EQ(set.credits[1].url, "https://example.com");
@@ -340,6 +345,34 @@ TEST(points_cap_matches_old_scaling) {
   // All ones over the cap: the old loop gives up rather than zeroing.
   CHECK_EQ(Capped(std::vector<uint32_t>(12, 1), 10), std::vector<uint32_t>(12, 1));
   CHECK_EQ(Capped({600}, 0), std::vector<uint32_t>{600});
+}
+
+namespace {
+std::vector<uint32_t> Totaled(std::vector<uint32_t> points, uint32_t total) {
+  std::vector<Achievement> list(points.size());
+  for (size_t i = 0; i < points.size(); ++i) list[i].points = points[i];
+  detail::ScalePointsTo(list, total);
+  for (size_t i = 0; i < points.size(); ++i) points[i] = list[i].points;
+  return points;
+}
+}  // namespace
+
+TEST(points_total_scales_up_and_down) {
+  // Up: 333.3 and 666.7 round to exactly 1000.
+  CHECK_EQ(Totaled({100, 200}, 1000), (std::vector<uint32_t>{333, 667}));
+  CHECK_EQ(Totaled({10, 20, 30}, 1000), (std::vector<uint32_t>{167, 333, 500}));
+  // 999 after rounding: the first largest gets the missing point.
+  CHECK_EQ(Totaled({5, 5, 5}, 1000), (std::vector<uint32_t>{334, 333, 333}));
+  // Down works as points_cap does.
+  CHECK_EQ(Totaled({500, 500, 500}, 1000), (std::vector<uint32_t>{334, 333, 333}));
+  // The remainder goes to the shares rounded down the most, not all to one.
+  CHECK_EQ(Totaled({1, 1, 1, 2}, 12), (std::vector<uint32_t>{3, 2, 2, 5}));  // 2.4 2.4 2.4 4.8
+  CHECK_EQ(Totaled({3, 3, 3, 3, 3, 3}, 10), (std::vector<uint32_t>{2, 2, 2, 2, 1, 1}));
+  // Zero stays zero; already at the total, no points, or total 0: untouched.
+  CHECK_EQ(Totaled({0, 5}, 1000), (std::vector<uint32_t>{0, 1000}));
+  CHECK_EQ(Totaled({400, 600}, 1000), (std::vector<uint32_t>{400, 600}));
+  CHECK_EQ(Totaled({0, 0}, 1000), (std::vector<uint32_t>{0, 0}));
+  CHECK_EQ(Totaled({600}, 0), std::vector<uint32_t>{600});
 }
 
 TEST(load_set_json_from_memory) {

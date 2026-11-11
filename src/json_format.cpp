@@ -574,7 +574,7 @@ bool ParseNativeSet(const json& doc, const fs::path& origin, AchievementSet& out
     const auto set_it = doc.find("set");
     const json& s = set_it == doc.end() || set_it->is_null() ? empty : *set_it;
     r.ExpectObject(s, "set");
-    r.CheckKeys(s, "set", {"id", "title", "platform", "category", "points_cap", "enabled", "credits", "source"});
+    r.CheckKeys(s, "set", {"id", "title", "platform", "category", "points_cap", "points_total", "enabled", "credits", "source"});
     set.id = r.String(s, "id", "set").value_or(DefaultSetId(origin));
     if (set.id.empty()) r.Fail("set.id", "must not be empty");
     set.title = r.String(s, "title", "set").value_or(set.id);
@@ -587,6 +587,7 @@ bool ParseNativeSet(const json& doc, const fs::path& origin, AchievementSet& out
     }
     set.category = r.String(s, "category", "set").value_or("");
     set.points_cap = r.U32(s, "points_cap", "set").value_or(0);
+    set.points_total = r.U32(s, "points_total", "set").value_or(0);
     set.enabled_by_default = r.Bool(s, "enabled", "set").value_or(true);
     set.credits = r.Credits(s, "set");
     if (const auto src = s.find("source"); src != s.end() && !src->is_null()) {
@@ -622,6 +623,7 @@ json NativeSetToJson(const AchievementSet& set) {
   if (set.platform != Platform::kCustom) s["platform"] = PlatformName(set.platform);
   if (!set.category.empty()) s["category"] = set.category;
   if (set.points_cap) s["points_cap"] = set.points_cap;
+  if (set.points_total) s["points_total"] = set.points_total;
   if (!set.enabled_by_default) s["enabled"] = false;
   auto credits_json = [](const std::vector<Credit>& credits) {
     json out = json::array();
@@ -838,6 +840,50 @@ void ApplyPointsCap(std::vector<Achievement>& achievements, uint32_t cap) {
   while (scaled_total < cap) {
     ++largest()->points;
     ++scaled_total;
+  }
+}
+
+void ScalePointsTo(std::vector<Achievement>& achievements, uint32_t target) {
+  uint64_t total = 0;
+  for (const auto& a : achievements) total += a.points;
+  if (target == 0 || total == 0 || total == target) return;
+
+  // Largest remainder: round each share down (at least 1), then hand the
+  // missing points to the shares rounded down the most, so they spread
+  // instead of piling onto one achievement.
+  const double factor = static_cast<double>(target) / static_cast<double>(total);
+  std::vector<double> fraction(achievements.size(), -1.0);
+  uint64_t scaled_total = 0;
+  for (size_t i = 0; i < achievements.size(); ++i) {
+    auto& a = achievements[i];
+    if (a.points == 0) continue;
+    const double exact = a.points * factor;
+    const double floor = std::floor(exact);
+    fraction[i] = exact - floor;
+    a.points = std::max(1u, static_cast<uint32_t>(floor));
+    scaled_total += a.points;
+  }
+  if (scaled_total < target) {
+    // Biggest remainder first; ties go to the larger value, then the earlier one.
+    std::vector<size_t> order;
+    for (size_t i = 0; i < achievements.size(); ++i)
+      if (fraction[i] >= 0.0) order.push_back(i);
+    std::stable_sort(order.begin(), order.end(), [&](size_t x, size_t y) {
+      if (fraction[x] != fraction[y]) return fraction[x] > fraction[y];
+      return achievements[x].points > achievements[y].points;
+    });
+    for (size_t k = 0; scaled_total < target; k = (k + 1) % order.size()) {
+      ++achievements[order[k]].points;
+      ++scaled_total;
+    }
+  }
+  // Raising tiny shares to 1 can overshoot: trim the largest (the first, on ties).
+  while (scaled_total > target) {
+    const auto it = std::max_element(achievements.begin(), achievements.end(),
+                                      [](const Achievement& x, const Achievement& y) { return x.points < y.points; });
+    if (it->points <= 1) break;
+    --it->points;
+    --scaled_total;
   }
 }
 

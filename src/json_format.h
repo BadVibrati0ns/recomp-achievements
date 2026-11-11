@@ -60,5 +60,9 @@ bool HasProgress(const Progress& progress);
 // to the scaled value (at least 1), then trim or pad the largest until the
 // total is exactly the cap. Leaves sets at or under the cap untouched.
 void ApplyPointsCap(std::vector<Achievement>& achievements, uint32_t cap);
+// Scales points up or down to exactly total (at least 1 each), handing the
+// rounding remainder to the shares rounded down the most. Leaves sets with no
+// points (or total 0) untouched.
+void ScalePointsTo(std::vector<Achievement>& achievements, uint32_t total);
 
 }  // namespace recomp::achievements::detail
