@@ -16,7 +16,7 @@ For each achievement set the style is resolved from, lowest first:
    |-------------------------|---------------|
    | Xbox 360 (XDBF/SPA)     | `xbox360`     |
    | PlayStation 3 (TROPHY)  | `ps3`         |
-   | RetroAchievements       | `retro`       |
+   | RetroAchievements       | `minimal`     |
    | Custom (game JSON/code) | `minimal`     |
 
 2. **Game style JSON**: shipped with the game (`StyleManager::LoadGameStyleFile`

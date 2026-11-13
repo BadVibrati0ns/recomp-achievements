@@ -583,7 +583,8 @@ std::string_view DefaultThemeFor(Platform platform) {
   switch (platform) {
     case Platform::kXbox360: return "xbox360";
     case Platform::kPlayStation3: return "ps3";
-    case Platform::kRetroAchievements: return "retro";
+    // RetroAchievements lists get the quiet modern look too; "retro" is there
+    // for games and players who pick it.
     default: return "minimal";
   }
 }

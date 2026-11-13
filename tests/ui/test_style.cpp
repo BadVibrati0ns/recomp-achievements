@@ -54,7 +54,7 @@ TEST(style_builtin_themes) {
 TEST(style_default_theme_by_platform) {
   CHECK(DefaultThemeFor(Platform::kXbox360) == "xbox360");
   CHECK(DefaultThemeFor(Platform::kPlayStation3) == "ps3");
-  CHECK(DefaultThemeFor(Platform::kRetroAchievements) == "retro");
+  CHECK(DefaultThemeFor(Platform::kRetroAchievements) == "minimal");
   CHECK(DefaultThemeFor(Platform::kCustom) == "minimal");
 }
 
@@ -216,7 +216,7 @@ TEST(style_manager_theme_choice_skips_lower_layers) {
 TEST(style_manager_default_by_platform) {
   StyleManager m;
   auto r = MakeSet("r", Platform::kRetroAchievements);
-  CHECK(m.Resolve(&r)->theme == "retro");
+  CHECK(m.Resolve(&r)->theme == "minimal");  // Not "retro": that one is picked, not given.
   CHECK(m.Resolve("p", Platform::kPlayStation3)->theme == "ps3");
   CHECK(m.Resolve(nullptr)->theme == "minimal");
 }
