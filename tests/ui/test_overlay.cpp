@@ -774,14 +774,15 @@ TEST(overlay_settings_volume_and_sound) {
   r.Tap([](OverlayInput& in) { in.pad_start = true; });
   r.Tap([](OverlayInput& in) { in.pad_down = true; });
   CHECK_EQ(r.V().setting_selected, std::string("volume"));
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.5f, 1e-6);  // Half until the player picks.
   // Left / right step 10%, saved in the System, with a preview each time.
   r.Tap([](OverlayInput& in) { in.pad_left = true; });
   r.Tap([](OverlayInput& in) { in.left = true; });
-  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.8f, 1e-6);
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.3f, 1e-6);
   CHECK_EQ(played.size(), 2u);
   r.Tap([](OverlayInput& in) { in.pad_right = true; });
-  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.9f, 1e-6);
-  CHECK_NEAR(r.system.GetSetting("popup_sound")["volume"].get<double>(), 0.9, 1e-9);
+  CHECK_NEAR(GetPopupSoundSettings(r.system).volume, 0.4f, 1e-6);
+  CHECK_NEAR(r.system.GetSetting("popup_sound")["volume"].get<double>(), 0.4, 1e-6);
   CHECK(r.overlay->is_open());
   CHECK(r.V().settings);  // Left / right adjust here instead of switching tabs.
   for (int i = 0; i < 15; ++i) r.Tap([](OverlayInput& in) { in.right = true; });

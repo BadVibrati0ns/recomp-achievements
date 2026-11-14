@@ -199,8 +199,8 @@ Start (Options on PlayStation), F2 or the Settings button beside the title opens
 to the list. Everything is saved through the `System` ([settings file](json-format.md#settings-file)), so a
 game passes nothing but its storage folder. Four sections, each a list of rows:
 
-- **Popup sound**: a switch, and the volume in 10% steps with left / right (or a click on the track). Each
-  change plays the progress sound at the new level. The overlay applies both to every popup: nothing reaches
+- **Popup sound**: a switch, and the volume (50% until the player changes it) in 10% steps with left / right
+  (or a click on the track). Each change plays the progress sound at the new level. The overlay applies both to every popup: nothing reaches
   `play_sound` / `sound_handler` while sound is off, and the volume they get already includes the player's.
   Games that play popup sounds another way read `ui::GetPopupSoundSettings(system)` (`sounds.h`) or
   multiply with `ui::PopupSoundGain()`.

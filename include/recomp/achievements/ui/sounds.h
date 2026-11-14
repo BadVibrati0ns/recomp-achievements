@@ -26,12 +26,12 @@ class System;
 namespace recomp::achievements::ui {
 
 // The player's popup sound choice for this game, kept in the System's
-// settings ("popup_sound": {"enabled": true, "volume": 1.0}). The overlay and
+// settings ("popup_sound": {"enabled": true, "volume": 0.5}). The overlay and
 // PopupUi apply it themselves: volume multiplies the style's, and nothing
 // plays when off. Games that mix popup sounds another way read it here.
 struct PopupSoundSettings {
   bool enabled = true;
-  float volume = 1.0f;  // 0..1.
+  float volume = 0.5f;  // 0..1; half by default.
   bool operator==(const PopupSoundSettings&) const = default;
 };
 inline constexpr std::string_view kPopupSoundSetting = "popup_sound";
